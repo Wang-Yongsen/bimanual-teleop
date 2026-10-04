@@ -140,6 +140,60 @@ class RecordingDatasetTests(unittest.TestCase):
         # Last sample of the first fragment cannot reach the next fragment.
         np.testing.assert_array_equal(dataset[1]["action"], self.root["data/action"][1:3])
 
+    def use_source_episode_boundaries(self, ends=(6, 9)):
+        meta = self.root["meta"]
+        meta["episode_ends"].resize(len(ends))
+        meta["episode_ends"][:] = ends
+        meta.array("segment_ends", np.array([3, 6, 9], dtype=np.int64))
+        self.root.attrs["schema_version"] = 2
+
+    def test_new_format_samples_segments_and_splits_source_demonstrations(self):
+        self.use_source_episode_boundaries()
+        dataset = self.dataset(val_ratio=.5, pad_after=1)
+        self.assertEqual(dataset.replay_buffer.n_episodes, 2)
+        self.assertEqual(dataset.n_source_episodes, 2)
+        self.assertEqual(dataset.n_segments, 3)
+        np.testing.assert_array_equal(dataset.train_mask, [True, True, False])
+        np.testing.assert_array_equal(dataset.val_mask, [False, False, True])
+        # Padding stays within the first segment, even within one source episode.
+        np.testing.assert_array_equal(dataset[2]["action"], self.root["data/action"][[2, 2]])
+        np.testing.assert_array_equal(dataset[3]["action"], self.root["data/action"][3:5])
+        validation = dataset.get_validation_dataset()
+        np.testing.assert_array_equal(validation[0]["action"], self.root["data/action"][6:8])
+
+    def test_single_source_episode_has_no_held_out_split_despite_multiple_segments(self):
+        self.use_source_episode_boundaries(ends=(9,))
+        self.root["meta"].attrs["segments"] = [{"source_episode": "a"}] * 3
+        dataset = self.dataset(val_ratio=.5)
+        self.assertEqual(dataset.n_source_episodes, 1)
+        np.testing.assert_array_equal(dataset.train_mask, [True, True, True])
+        self.assertEqual(len(dataset.get_validation_dataset()), 0)
+
+    def test_missing_source_metadata_uses_original_episode_boundaries(self):
+        self.use_source_episode_boundaries()
+        del self.root["meta"].attrs["segments"]
+        dataset = self.dataset(val_ratio=.5)
+        np.testing.assert_array_equal(dataset.train_mask, [True, True, False])
+        np.testing.assert_array_equal(dataset.val_mask, [False, False, True])
+
+    def test_segment_partition_must_preserve_original_episode_boundaries(self):
+        self.use_source_episode_boundaries()
+        self.root["meta/segment_ends"][:] = [3, 5, 9]
+        with self.assertRaisesRegex(ValueError, "preserve episode boundaries"):
+            self.dataset()
+
+    def test_segment_metadata_must_match_source_episode_boundaries(self):
+        self.use_source_episode_boundaries()
+        self.root["meta"].attrs["segments"] = [
+            {"source_episode": "a"}, {"source_episode": "b"}, {"source_episode": "b"}]
+        with self.assertRaisesRegex(ValueError, "same source_episode"):
+            self.dataset()
+
+    def test_new_format_requires_gap_boundaries(self):
+        self.root.attrs["schema_version"] = 2
+        with self.assertRaisesRegex(ValueError, "requires segment_ends"):
+            self.dataset()
+
     def test_shape_mismatch_is_rejected_before_training(self):
         self.shape_meta["action"]["shape"] = [54]
         with self.assertRaisesRegex(ValueError, "action"):

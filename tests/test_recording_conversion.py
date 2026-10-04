@@ -98,15 +98,15 @@ class RecordingConversionTests(unittest.TestCase):
         self.input = self.root / "raw"
         self.output = self.root / "dataset.zarr"
 
-    def convert(self, action_space="eef"):
+    def convert(self, action_space="eef", **kwargs):
         import zarr
 
-        report = convert_recordings(self.input, self.output, action_space=action_space)
+        report = convert_recordings(self.input, self.output, action_space=action_space, **kwargs)
         return zarr.open_group(str(self.output), mode="r"), report
 
     def test_eef_actions_are_controller_goals_and_observations_are_interpolated(self):
         make_episode(self.input, depth=True)
-        dataset, report = self.convert()
+        dataset, report = self.convert(include_depth=True)
         data = dataset["data"]
         np.testing.assert_allclose(data["timestamp"][:], [.010, .043, .077, .110])
         np.testing.assert_allclose(data["robot_joint"][:, 0], [.010, .043, .077, .110])
@@ -123,6 +123,7 @@ class RecordingConversionTests(unittest.TestCase):
         self.assertEqual(data["robot_joint"].dtype, np.dtype("float32"))
         self.assertEqual(data["timestamp"].dtype, np.dtype("float64"))
         np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [4])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [4])
         self.assertEqual(report["output_frames"], 4)
         self.assertEqual(dataset["meta"].attrs["quality_report"]["episodes"][0]["metadata"]["model"], "test-model")
 
@@ -145,28 +146,75 @@ class RecordingConversionTests(unittest.TestCase):
         raw["arms/left/wrench"][13, 0] = np.nan  # Exactly at 130 ms.
         dataset, report = self.convert()
         np.testing.assert_allclose(dataset["data/timestamp"][:], [.01, .04, .10, .16])
-        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [2, 3, 4])
+        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [4])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [2, 3, 4])
+        self.assertEqual(report["output_episodes"], 1)
+        self.assertEqual(report["output_segments"], 3)
         self.assertEqual(report["episodes"][0]["invalid_reasons"]["camera_1_unmatched"], 1)
         self.assertEqual(dataset["meta"].attrs["segments"][1]["reference_frame_start"], 3)
 
     def test_large_main_camera_gap_starts_a_new_episode(self):
         make_episode(self.input, main=(10, 40, 120, 150))
         dataset, report = self.convert()
-        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [2, 4])
+        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [4])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [2, 4])
         self.assertEqual(report["episodes"][0]["main_camera_gaps"], 1)
 
     def test_state_interpolation_never_bridges_more_than_50ms_or_extrapolates(self):
         make_episode(self.input, main=(0, 30, 60, 90), state=(0, 60), commands=(0, 30, 60, 90))
         dataset, _ = self.convert()
         np.testing.assert_allclose(dataset["data/timestamp"][:], [0., .06])
-        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [1, 2])
+        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [2])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [1, 2])
 
     def test_commands_do_not_use_future_samples_or_hold_stale_values(self):
         make_episode(self.input, main=(10, 40, 80, 100), commands=(20, 100))
         dataset, _ = self.convert()
         np.testing.assert_allclose(dataset["data/timestamp"][:], [.04, .10])
         np.testing.assert_allclose(dataset["data/action"][:, 0], [5.02, 5.10], atol=1e-6)
-        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [1, 2])
+        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [2])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [1, 2])
+
+    def test_depth_gaps_are_ignored_by_default_and_checked_only_when_requested(self):
+        import zarr
+
+        _, raw = make_episode(self.input, main=(10, 40, 70, 100), depth=True)
+        # Remove the depth frame near the 70 ms RGB frame.
+        for key in ("time_ns", "sequence", "source_time_ms", "image"):
+            array = raw[f"cameras/camera_0/depth/{key}"]
+            kept = array[:][[0, 1, 3]]
+            array.resize(kept.shape)
+            array[:] = kept
+        dataset, report = self.convert()
+        self.assertNotIn("camera_0_depth", dataset["data"])
+        self.assertNotIn("camera_0_depth_unmatched", report["episodes"][0]["invalid_reasons"])
+        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [4])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [4])
+        with_depth = self.root / "with_depth.zarr"
+        report = convert_recordings(self.input, with_depth, action_space="eef", include_depth=True)
+        dataset = zarr.open_group(str(with_depth), mode="r")
+        self.assertIn("camera_0_depth", dataset["data"])
+        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [3])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [2, 3])
+        self.assertEqual(report["episodes"][0]["invalid_reasons"]["camera_0_depth_unmatched"], 1)
+
+    def test_multiple_demonstrations_keep_separate_episode_and_segment_boundaries(self):
+        make_episode(self.input, main=(10, 40, 120, 150), depth=True)
+        make_episode(self.input, name="episode_000001")
+        dataset, report = self.convert()
+        np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [4, 8])
+        np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [2, 4, 8])
+        self.assertEqual(report["output_episodes"], 2)
+        self.assertEqual(report["output_segments"], 3)
+        self.assertEqual(dataset.attrs["schema_version"], 2)
+        self.assertNotIn("camera_0_depth", dataset["data"])
+
+    def test_including_depth_rejects_mixed_depth_recordings(self):
+        make_episode(self.input, depth=True)
+        make_episode(self.input, name="episode_000001")
+        with self.assertRaisesRegex(ValueError, "consistently include or omit"):
+            self.convert(include_depth=True)
+        self.assertFalse(self.output.exists())
 
     def test_pose_interpolation_uses_shortest_rotation_path(self):
         _, raw = make_episode(self.input, main=(20,), state=(0, 40), commands=(0, 40))
@@ -230,6 +278,24 @@ class RecordingConversionTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
             main(["--input", str(self.input), "--output", str(self.output)])
         self.assertEqual(caught.exception.code, 2)
+
+    def test_cli_depth_is_opt_in_and_counts_demonstrations_separately(self):
+        from bimanual_teleop.cli.convert_recording import main
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        import io
+
+        report = {"output_episodes": 1, "output_segments": 3, "output_frames": 4}
+        for extra, expected in (([], False), (["--include-depth"], True)):
+            with self.subTest(include_depth=expected):
+                output = io.StringIO()
+                with patch("bimanual_teleop.cli.convert_recording.convert_recordings", return_value=report) as convert:
+                    with redirect_stdout(output):
+                        result = main(["--input", str(self.input), "--output", str(self.output),
+                                       "--action-space", "eef"] + extra)
+                self.assertEqual(result, 0)
+                convert.assert_called_once_with(self.input, self.output, action_space="eef", include_depth=expected)
+                self.assertIn("1 条原始演示、3 个连续片段", output.getvalue())
 
 
 if __name__ == "__main__":

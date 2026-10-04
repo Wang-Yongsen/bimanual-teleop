@@ -104,16 +104,25 @@ python scripts/convert_recording.py \
 
 输入也可以是一条 episode 或含多个会话的目录。输出路径必须尚不存在，转换失败不会发布半成品或覆盖旧数据。
 
-以主 RGB 的真实帧时间为基准，其他 RGB 和主视角深度选最近帧，最大时间差 20 ms。实际关节、位置和力线性插值，姿态用 SLERP；状态插值间隔不得超过 50 ms，不在观测边界外补值。action 取该时刻之前最近一次成功提交的目标，最大命令龄 50 ms，不插值控制命令、不人为移动一帧。
+默认只导出 RGB、机器人状态与动作：即使原始记录包含深度，也不读取、导出深度或因深度缺帧剔除 RGB 样本。需要深度数据时显式添加 `--include-depth`，此时保留原来的深度匹配检查。同一次转换在默认 RGB 模式下可混合有深度与无深度的原始记录；显式包含深度时，完整条目的深度开关必须一致。
+
+以主 RGB 的真实帧时间为基准，其他 RGB 选最近帧，最大时间差 20 ms；显式包含深度时，深度也采用同一匹配规则。实际关节、位置和力线性插值，姿态用 SLERP；状态插值间隔不得超过 50 ms，不在观测边界外补值。action 取该时刻之前最近一次成功提交的目标，最大命令龄 50 ms，不插值控制命令、不人为移动一帧。
 
 缺失、无效数据和主相机超过 50 ms 的帧间隔会拆成连续片段；训练采样不会跨缺口。首尾不满足对齐条件的帧被裁掉。原始时间轴是名义 30 Hz，而非人为生成的严格等间隔网格。
 
-输出遵循 DP ReplayBuffer 的 `data/*` 和累计 `meta/episode_ends`：
+输出 schema v2 使用 DP ReplayBuffer 的 `data/*`，并区分两类累计边界：
+
+- `meta/episode_ends`：每条保留了有效帧的原始演示占一个元素，一条原始演示对应 `[T]`。失败或没有有效帧的条目不占元素。
+- `meta/segment_ends`：每个连续有效片段占一个元素，用于约束训练窗口不跨缺帧或时间缺口。每个原始演示边界也是片段边界。
+
+例如一条演示保留 100 帧，中间在第 40 帧后存在缺口，则 `episode_ends=[100]`、`segment_ends=[40,100]`。切片段不增加独立演示数。CLI 和质检报告分别显示 `output_episodes` 与 `output_segments`。
+
+直接使用只读取 `episode_ends` 的通用 DP loader 会忽略内部缺口；本项目适配器会使用 `segment_ends` 采样。自定义 loader 也必须遵循该约定。
 
 | 字段 | 形状 / 类型 |
 | --- | --- |
 | `camera_0`、`camera_1`、`camera_2` | `(T,480,640,3)`，RGB uint8 |
-| `camera_0_depth`（启用时） | `(T,480,640)`，uint16 |
+| `camera_0_depth`（显式 `--include-depth` 时且原始记录有深度） | `(T,480,640)`，uint16 |
 | `robot_eef_pose` | `(T,12)`，每臂 xyz＋旋转向量 |
 | `robot_joint` | `(T,14)` |
 | `hand_joint` | `(T,40)` |
@@ -121,7 +130,9 @@ python scripts/convert_recording.py \
 | `action` | eef 模式 `(T,52)`；joint 模式 `(T,54)` |
 | `timestamp` | `(T,)`，相对原始 episode 开始的秒数，float64 |
 
-所有低维训练值为 float32，各组内部先左后右；action 为左臂、右臂、左手、右手。质检结果和片段来源保存在 `meta.attrs['quality_report']` 与 `meta.attrs['segments']`，标定参数保留在对应源条目的 metadata。一个输出不能混合开启与关闭深度的完整条目。
+所有低维训练值为 float32，各组内部先左后右；action 为左臂、右臂、左手、右手。质检结果和片段来源保存在 `meta.attrs['quality_report']` 与 `meta.attrs['segments']`，标定参数保留在对应源条目的 metadata。`segments` 与 `segment_ends` 一一对应，包含原始演示来源和片段输出范围。
+
+旧 schema v1 将连续片段的结束位置写入 `episode_ends`，所以一次采集可能出现多个元素。适配器仍支持这类旧数据，通过 `segments.source_episode` 分组。旧数据中已丢弃的 RGB 帧必须从原始记录重新转换才能恢复，修改旧 zarr 的边界数组不能恢复帧。
 
 ## DP 训练接入
 
@@ -131,8 +142,8 @@ python scripts/convert_recording.py \
 bimanual_teleop.recording.dataset.BimanualImageDataset
 ```
 
-`configs/dp_eef.yaml`、`configs/dp_joint.yaml` 是两种实验的数据读取配置片段，不是完整训练配置。两者分别选择末端观测或关节观测，并使用三 RGB、手关节及六维力。只有 `shape_meta.obs` 中选择的字段进入模型。深度保存在数据集内，默认不送入 RGB 编码器；深度网络不在本次实现范围。
+`configs/dp_eef.yaml`、`configs/dp_joint.yaml` 是两种实验的数据读取配置片段，不是完整训练配置。两者分别选择末端观测或关节观测，并使用三 RGB、手关节及六维力。只有 `shape_meta.obs` 中选择的字段进入模型。默认转换不保存深度；显式保存的深度也不会自动送入 RGB 编码器，深度网络不在本次实现范围。
 
-在已有官方 DP 训练环境中安装本项目及 recording 依赖，再使用该 dataset target 和匹配的 `shape_meta`。采集环境不安装 PyTorch、训练框架或模型。适配器复用 DP 的序列采样和归一化接口，同一原始演示拆出的片段保持在同一训练/验证分区。
+在已有官方 DP 训练环境中安装本项目及 recording 依赖，再使用该 dataset target 和匹配的 `shape_meta`。采集环境不安装 PyTorch、训练框架或模型。适配器复用 DP 的序列采样和归一化接口，以只读视图向采样器提供片段边界，保留数据集自身的原始演示边界。同一原始演示拆出的片段保持在同一训练/验证分区；只有一条演示时没有独立验证集。
 
 设计依据：[DP 实机代码](https://github.com/real-stanford/diffusion_policy/blob/main/diffusion_policy/real_world/real_env.py)、[DP 双臂论文 §7.1](https://arxiv.org/html/2303.04137v5#S7.SS1)、[UMI 双臂对齐](https://github.com/real-stanford/universal_manipulation_interface/blob/main/umi/real_world/bimanual_umi_env.py)、[ALOHA 录制](https://github.com/tonyzhaozh/aloha/blob/main/aloha_scripts/record_episodes.py)、[TeleVision 后处理](https://github.com/OpenTeleVision/TeleVision/blob/main/scripts/post_process.py)。仅借鉴本项目需要的部分；未照搬其平台专属字段或固定延迟。
