@@ -49,7 +49,7 @@ local.properties
 
 # Local demonstration datasets
 /recordings/
+/raw_spools/
 /datasets/
 /logs/
 
-临时文件/

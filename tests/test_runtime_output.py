@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 import yaml
 
 from bimanual_teleop.common.console import (
-    LiveProgress, StatusConsole, configure_runtime_logging, format_message, runtime_message,
+    EpisodeProgress, LiveProgress, StatusConsole, configure_runtime_logging, format_message, runtime_message,
 )
 from bimanual_teleop.common.runlog import RuntimeLog
 
@@ -66,12 +66,20 @@ class ConsoleBehaviorTests(unittest.TestCase):
             run_log = configure_runtime_logging(log_file=path)
             run_log.start(command="test", arguments={"path": Path("config.yaml")})
             logging.getLogger("bimanual_teleop.test_output").debug("周期细节")
+            logging.getLogger("bimanual_teleop.test_output").warning("故障细节")
             run_log.event("runtime_status", value=float("nan"))
             run_log.close(result="ok")
             rows = [json.loads(line) for line in path.read_text().splitlines()]
         self.assertEqual(rows[0]["event"], "session_start")
+        self.assertIn("thread_schedstat", rows[0]["process"])
+        self.assertIn("cpu_pressure", rows[0]["process"])
+        self.assertIn("io_pressure", rows[0]["process"])
+        self.assertIn("process_io", rows[0]["process"])
+        self.assertIn("cgroup_cpu", rows[0]["process"])
+        self.assertFalse(any(row["event"] == "python_log" and
+                             row["message"] == "周期细节" for row in rows))
         self.assertTrue(any(row["event"] == "python_log" and
-                            row["message"] == "周期细节" for row in rows))
+                            row["message"] == "故障细节" for row in rows))
         self.assertTrue(any(row["event"] == "runtime_status" and
                             row["value"] == "nan" for row in rows))
         self.assertEqual(rows[-1]["event"], "session_end")
@@ -123,6 +131,17 @@ class ConsoleBehaviorTests(unittest.TestCase):
         LiveProgress(stream=redirected).update("不应输出")
         self.assertEqual(redirected.getvalue(), "")
 
+    def test_episode_progress_draws_only_on_a_terminal(self):
+        for stream, drawn in ((TtyBuffer(), True), (io.StringIO(), False)):
+            with self.subTest(drawn=drawn), EpisodeProgress("整理条目", stream=stream) as progress:
+                progress.start(2)
+                progress.episode("session/episode_000000")
+                progress.total(10)
+                progress.advance(10)
+                progress.finish_episode()
+            self.assertEqual("整理条目" in stream.getvalue(), drawn)
+            self.assertEqual("1/2" in stream.getvalue(), drawn)
+
     def test_wuji_sdk_defaults_to_errors_without_duplicate_handlers(self):
         sdk = SimpleNamespace(set_log_level=Mock())
         with patch.dict("sys.modules", {"wuji_sdk": sdk}):
@@ -152,12 +171,14 @@ class ConsoleBehaviorTests(unittest.TestCase):
         ui = TeleopUI(runtime, None, emit=lambda _: None, runtime_log=run_log)
         ui.loop_timing = {"wake_lateness_ns": 5}
         ui.record_cycle(runtime, 12)
+        ui.log_runtime_status(runtime.status())
         ui.report_runtime_pause()
         pauses = [details for event, details in events if event == "motion_pause"]
         self.assertEqual(len(pauses), 1)
         self.assertEqual(pauses[0]["preceding_cycles"][0]["cycle_index"], 12)
         self.assertEqual(pauses[0]["diagnostic"]["driver_stop"]["target_age_ms"], 51.)
         self.assertEqual(pauses[0]["diagnostic"]["hands"]["snapshot_sequence"], 4)
+        self.assertEqual([event for event, _ in events], ["motion_pause"])
 
 
 class EntryBehaviorTests(unittest.TestCase):

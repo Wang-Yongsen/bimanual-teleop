@@ -122,6 +122,63 @@ class LiveProgress:
             self._width = 0
 
 
+class EpisodeProgress:
+    """Episode count bar plus a work bar for the current episode.
+
+    Drawn only on a terminal; every method is a no-op otherwise, so library
+    code can report progress unconditionally.
+    """
+
+    def __init__(self, description="", *, stream=None, enabled=None):
+        self.stream = sys.stderr if stream is None else stream
+        self.enabled = (getattr(self.stream, "isatty", lambda: False)()
+                        if enabled is None else enabled)
+        self.description = description
+        self._progress = None
+
+    def __enter__(self):
+        if self.enabled:
+            from rich.console import Console
+            from rich.progress import (BarColumn, MofNCompleteColumn, Progress, TextColumn,
+                                       TimeElapsedColumn, TimeRemainingColumn)
+
+            self._progress = Progress(
+                TextColumn("{task.description}"), BarColumn(), MofNCompleteColumn(),
+                TimeElapsedColumn(), TimeRemainingColumn(),
+                console=Console(file=self.stream), redirect_stdout=False, redirect_stderr=False)
+            self._progress.start()
+            self._episodes = self._progress.add_task(self.description, total=None)
+            self._work = self._progress.add_task("", total=None, visible=False)
+        return self
+
+    def __exit__(self, *_exc):
+        if self._progress is not None:
+            self._progress.update(self._work, visible=False)
+            self._progress.stop()
+            self._progress = None
+        return False
+
+    def start(self, episodes):
+        if self._progress is not None:
+            self._progress.update(self._episodes, total=episodes)
+
+    def episode(self, name, total=None):
+        if self._progress is not None:
+            self._progress.reset(self._work, total=total, description=f"  {name}", visible=True)
+
+    def total(self, total):
+        if self._progress is not None:
+            self._progress.update(self._work, total=total)
+
+    def advance(self, count=1):
+        if self._progress is not None:
+            self._progress.advance(self._work, count)
+
+    def finish_episode(self):
+        if self._progress is not None:
+            self._progress.advance(self._episodes)
+
+
 class _ConciseLogHandler(logging.Handler):
     def __init__(self, console, *, verbose=False):
         super().__init__()
@@ -159,7 +216,11 @@ def configure_runtime_logging(*, wuji=False, verbose=False, log_file=None):
     logger.propagate = False
     run_log = RuntimeLog(log_file) if log_file is not None else None
     if run_log is not None:
-        run_log.attach_python_logging(logger)
+        # Routine debug/info messages are useful only in an explicitly verbose
+        # run.  Normal runtime logs retain warnings and errors, avoiding
+        # background JSON work for successful control cycles.
+        run_log.attach_python_logging(
+            logger, level=logging.DEBUG if verbose else logging.WARNING)
     if wuji:
         import wuji_sdk
         wuji_sdk.set_log_level("debug" if verbose else "error")

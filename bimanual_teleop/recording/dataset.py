@@ -3,6 +3,7 @@
 Hydra target: bimanual_teleop.recording.dataset.BimanualImageDataset.
 Only shape_meta['obs'] keys enter training. RGB is converted HWC uint8 ->
 CHW float32 / 255; optional recorded depth is not selected automatically.
+Source episode boundaries are distinct from continuous sampling segments.
 Importing this module does not import torch or any training dependencies.
 """
 
@@ -10,6 +11,17 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
+
+
+class _SegmentReplayBuffer:
+    """Read-only sampler view sharing data while exposing gap boundaries."""
+
+    def __init__(self, replay_buffer, segment_ends):
+        self.replay_buffer = replay_buffer
+        self.episode_ends = segment_ends
+
+    def __getitem__(self, key):
+        return self.replay_buffer[key]
 
 
 class _DatasetMethods:
@@ -65,14 +77,38 @@ class _DatasetMethods:
         self.horizon, self.n_obs_steps = horizon, n_obs_steps
         self.pad_before, self.pad_after = pad_before, pad_after
 
-        # Splits remain independent when gaps split one demonstration into
-        # multiple DP episodes: all fragments stay in the same partition.
-        n_episodes = self.replay_buffer.n_episodes
+        # All continuous segments of a source demonstration stay in one
+        # partition, independently of how episode boundaries were stored.
+        episode_ends = np.asarray(self.replay_buffer.episode_ends[:])
+        if "segment_ends" in root["meta"]:
+            segment_ends = np.asarray(root["meta/segment_ends"][:])
+            if (segment_ends.ndim != 1 or segment_ends.dtype != np.dtype("int64")
+                    or not len(segment_ends) or segment_ends[0] <= 0
+                    or np.any(np.diff(segment_ends) <= 0)
+                    or segment_ends[-1] != episode_ends[-1]
+                    or not np.isin(episode_ends, segment_ends).all()):
+                raise ValueError("segment_ends must partition the data and preserve episode boundaries")
+        else:
+            # Legacy datasets stored continuous segment ends as episode_ends.
+            if root.attrs.get("schema_version", 1) >= 2:
+                raise ValueError("Converted schema v2 requires segment_ends for gap-safe sampling")
+            segment_ends = episode_ends
+        self.sampling_buffer = _SegmentReplayBuffer(self.replay_buffer, segment_ends)
+        self.n_segments = len(segment_ends)
         segments = root["meta"].attrs.get("segments", [])
-        if segments and len(segments) != n_episodes:
-            raise ValueError("Segment metadata does not match episode_ends")
-        sources = [row["source_episode"] for row in segments] if segments else list(range(n_episodes))
+        if segments and len(segments) != self.n_segments:
+            raise ValueError("Segment metadata does not match sampling boundaries")
+        episode_indices = np.searchsorted(episode_ends, segment_ends)
+        sources = ([row["source_episode"] for row in segments] if segments
+                   else episode_indices.tolist())
+        if "segment_ends" in root["meta"] and segments:
+            episode_sources = {}
+            for index, source in zip(episode_indices, sources):
+                if index in episode_sources and episode_sources[index] != source:
+                    raise ValueError("Segments within an episode must have the same source_episode")
+                episode_sources[index] = source
         source_ids = {source: i for i, source in enumerate(dict.fromkeys(sources))}
+        self.n_source_episodes = len(source_ids)
         indices = np.asarray([source_ids[source] for source in sources], dtype=np.int64)
         source_val = get_val_mask(n_episodes=len(source_ids), val_ratio=val_ratio, seed=seed)
         source_train = downsample_mask(~source_val, max_n=max_train_episodes, seed=seed)
@@ -83,7 +119,7 @@ class _DatasetMethods:
     def _make_sampler(self, mask):
         from diffusion_policy.common.sampler import SequenceSampler
 
-        return SequenceSampler(replay_buffer=self.replay_buffer, sequence_length=self.horizon,
+        return SequenceSampler(replay_buffer=self.sampling_buffer, sequence_length=self.horizon,
                                pad_before=self.pad_before, pad_after=self.pad_after,
                                keys=self.keys, episode_mask=mask)
 
