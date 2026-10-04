@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import shutil
 
+from bimanual_teleop.common.console import EpisodeProgress
+
 from .sink import Record, STREAM_FIELDS
 from .spool import CAMERA_META, NUMERIC_STRUCTS
 from .storage import EpisodeWriter, write_json
@@ -45,13 +47,17 @@ def _camera_records(path, stream):
             yield Record(stream, stamp, sequence, {"source_time_ms": source_ms})
 
 
-def _video_frame_count(path):
+def _video_frame_count(path, progress):
     import av
+    count = 0
     with av.open(str(path)) as container:
-        return sum(1 for _frame in container.decode(video=0))
+        for _frame in container.decode(video=0):
+            count += 1
+            progress.advance()
+    return count
 
 
-def _append_spool(writer, episode, document):
+def _append_spool(writer, episode, document, progress):
     raw = episode / SPOOL
     for stream in STREAM_FIELDS:
         path = raw / "streams" / (stream.replace("/", "__") + ".bin")
@@ -71,7 +77,7 @@ def _append_spool(writer, episode, document):
         if not metadata.is_file() or not video.is_file():
             raise ValueError(f"缺少 {camera} 视频或元数据")
         records = list(_camera_records(metadata, stream))
-        if _video_frame_count(video) != len(records):
+        if _video_frame_count(video, progress) != len(records):
             raise ValueError(f"{camera} 视频帧数与元数据不一致")
         previous = None
         for record in records:
@@ -99,6 +105,7 @@ def _append_spool(writer, episode, document):
                 image = np.frombuffer(payload, dtype="<u2").reshape(480, 640).copy()
                 writer.append(Record(stream, record.time_ns, record.sequence,
                     {**record.values, "image": image}))
+                progress.advance()
             if images.read(1):
                 raise ValueError("深度图像数量多于深度元数据")
     expected = document.get("counts", {})
@@ -106,8 +113,13 @@ def _append_spool(writer, episode, document):
         raise ValueError(f"原始计数不一致：清单={expected}，读取={writer.counts}")
 
 
-def finalize_episode(path, *, sdk_root=None):
-    """Finalize one captured episode and return its resulting status."""
+def finalize_episode(path, *, sdk_root=None, progress=None):
+    """Finalize one captured episode and return its resulting status.
+
+    ``progress`` counts decoded RGB frames and depth frames, which dominate the
+    run time; low-dimensional records are not counted.
+    """
+    progress = EpisodeProgress(enabled=False) if progress is None else progress
     episode = Path(path).resolve()
     manifest = episode / "episode.json"
     if not manifest.is_file():
@@ -120,6 +132,9 @@ def finalize_episode(path, *, sdk_root=None):
     document["status"] = "finalizing"
     document.pop("finalize_error", None)
     write_json(manifest, document)
+    counts = document.get("counts", {})
+    progress.total(sum(counts.get(stream, 0) for stream in
+                       [f"cameras/camera_{i}/rgb" for i in range(3)] + ["cameras/camera_0/depth"]))
     temporary = episode.parent / f".{episode.name}.finalizing-{os.getpid()}"
     if temporary.exists():
         shutil.rmtree(temporary)
@@ -131,7 +146,7 @@ def finalize_episode(path, *, sdk_root=None):
         if expected_model and kinematics.model.digest != expected_model:
             raise ValueError("离线整理使用的天机运动学模型与采集时不一致")
         writer = EpisodeWriter(temporary, document["start_ns"], document["metadata"], kinematics)
-        _append_spool(writer, episode, document)
+        _append_spool(writer, episode, document, progress)
         writer.close(document["end_ns"], status="complete")
         destination = episode / "raw.zarr"
         if destination.exists():
@@ -235,7 +250,7 @@ def _restore_spool(episode, archive):
     link.symlink_to(target, target_is_directory=True)
 
 
-def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=False):
+def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=False, progress=None):
     """Finalize every episode below ``path``.
 
     With ``spool_archive`` each complete episode's raw_spool moves out of the
@@ -243,6 +258,7 @@ def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=F
     and rebuilt from their spool, followed through the symlink or found again
     under ``spool_archive``; a missing spool leaves the episode complete.
     """
+    progress = EpisodeProgress(enabled=False) if progress is None else progress
     source = Path(path).resolve()
     episodes = find_episodes(source)
     if not episodes:
@@ -253,7 +269,10 @@ def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=F
             raise ValueError(f"{SPOOL} 归档目录不能位于输入目录内：{archive}")
     report = {"complete": 0, "discarded": 0, "skipped": 0, "failed": 0,
               "episodes": [], "deleted": [], "archived": [], "errors": []}
+    progress.start(len(episodes))
     for episode in episodes:
+        label = episode.name if episode == source else episode.relative_to(source).as_posix()
+        progress.episode(label)
         try:
             manifest = episode / "episode.json"
             document = json.loads(manifest.read_text(encoding="utf-8"))
@@ -271,13 +290,17 @@ def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=F
             if status == "complete" and refinalize:
                 document["status"] = "captured"
                 write_json(manifest, document)
-            status = finalize_episode(episode, sdk_root=sdk_root)
-            if status == "complete" and spool_archive is not None and archive_spool(episode, spool_archive):
-                report["archived"].append(str(episode))
+            status = finalize_episode(episode, sdk_root=sdk_root, progress=progress)
+            if status == "complete" and spool_archive is not None:
+                progress.episode(f"{label}：归档 {SPOOL}")
+                if archive_spool(episode, spool_archive):
+                    report["archived"].append(str(episode))
         except (OSError, ValueError, KeyError, ImportError, RuntimeError) as error:
             report["failed"] += 1
             report["errors"].append((str(episode), str(error)))
             continue
+        finally:
+            progress.finish_episode()
         report["complete"] += status == "complete"
         report["episodes"].append(str(episode))
     return report

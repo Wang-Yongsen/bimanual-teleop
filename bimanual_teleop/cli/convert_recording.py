@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import sys
 
+from bimanual_teleop.common.console import EpisodeProgress
 from bimanual_teleop.recording.convert import convert_recordings
 
 
@@ -20,8 +21,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         options = {} if args.conversion_config is None else {"conversion_config": args.conversion_config}
-        report = convert_recordings(args.input, args.output, action_space=args.action_space,
-                                    include_depth=args.include_depth, **options)
+        with EpisodeProgress("转换条目") as progress:
+            report = convert_recordings(args.input, args.output, action_space=args.action_space,
+                                        include_depth=args.include_depth, progress=progress, **options)
     except (OSError, ValueError, KeyError, ImportError, RuntimeError) as error:
         print(f"转换失败：{error}", file=sys.stderr)
         return 1

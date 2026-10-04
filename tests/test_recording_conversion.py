@@ -15,6 +15,29 @@ from bimanual_teleop.recording.convert import convert_recordings
 START_NS = 1_000_000_000
 
 
+class CountingProgress:
+    """Records what a converter reports to the terminal progress bars."""
+
+    def __init__(self):
+        self.episodes, self.names, self.totals, self.advanced, self.finished = None, [], [], [], 0
+
+    def start(self, episodes):
+        self.episodes = episodes
+
+    def episode(self, name, total=None):
+        self.names.append(name)
+        self.advanced.append(0)
+
+    def total(self, total):
+        self.totals.append(total)
+
+    def advance(self, count=1):
+        self.advanced[-1] += count
+
+    def finish_episode(self):
+        self.finished += 1
+
+
 def write_video(path, count, camera=0):
     import av
 
@@ -201,7 +224,12 @@ class RecordingConversionTests(unittest.TestCase):
     def test_multiple_demonstrations_keep_separate_episode_and_segment_boundaries(self):
         make_episode(self.input, main=(10, 40, 120, 150), depth=True)
         make_episode(self.input, name="episode_000001")
-        dataset, report = self.convert()
+        progress = CountingProgress()
+        dataset, report = self.convert(progress=progress)
+        self.assertEqual((progress.episodes, progress.finished), (2, 2))
+        self.assertEqual(progress.names, ["episode_000000", "episode_000001"])
+        self.assertEqual(progress.totals, [12, 12])
+        self.assertEqual(progress.advanced, progress.totals)
         np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [4, 8])
         np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [2, 4, 8])
         self.assertEqual(report["output_episodes"], 2)
@@ -282,7 +310,7 @@ class RecordingConversionTests(unittest.TestCase):
     def test_cli_depth_is_opt_in_and_counts_demonstrations_separately(self):
         from bimanual_teleop.cli.convert_recording import main
         from contextlib import redirect_stdout
-        from unittest.mock import patch
+        from unittest.mock import ANY, patch
         import io
 
         report = {"output_episodes": 1, "output_segments": 3, "output_frames": 4}
@@ -294,7 +322,8 @@ class RecordingConversionTests(unittest.TestCase):
                         result = main(["--input", str(self.input), "--output", str(self.output),
                                        "--action-space", "eef"] + extra)
                 self.assertEqual(result, 0)
-                convert.assert_called_once_with(self.input, self.output, action_space="eef", include_depth=expected)
+                convert.assert_called_once_with(self.input, self.output, action_space="eef",
+                                                include_depth=expected, progress=ANY)
                 self.assertIn("1 条原始演示、3 个连续片段", output.getvalue())
 
 

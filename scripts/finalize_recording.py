@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import sys
 
+from bimanual_teleop.common.console import EpisodeProgress
 from bimanual_teleop.devices.tianji.sdk import add_sdk_argument
 from bimanual_teleop.recording.finalize import finalize_recordings
 
@@ -21,8 +22,9 @@ def main(argv=None):
     add_sdk_argument(parser)
     args = parser.parse_args(argv)
     try:
-        report = finalize_recordings(args.input, sdk_root=args.sdk_root,
-                                     spool_archive=args.spool_archive, refinalize=args.refinalize)
+        with EpisodeProgress("整理条目") as progress:
+            report = finalize_recordings(args.input, sdk_root=args.sdk_root, spool_archive=args.spool_archive,
+                                         refinalize=args.refinalize, progress=progress)
     except (OSError, ValueError, KeyError, ImportError, RuntimeError) as error:
         print(f"整理失败：{error}", file=sys.stderr)
         return 1

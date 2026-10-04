@@ -18,6 +18,7 @@ from bimanual_teleop.recording.sink import Record
 from bimanual_teleop.recording.spool import (
     NVENCVideo, RawEpisodeWriter, SharedFrameRing, _release, preflight_nvenc)
 from bimanual_teleop.recording.storage import RGBVideo
+from tests.test_recording_conversion import CountingProgress
 from tests.test_recording_storage import _Kinematics
 
 
@@ -110,9 +111,13 @@ class RecordingSpoolTests(unittest.TestCase):
         captured = json.loads((self.episode / "episode.json").read_text())
         self.assertEqual(captured["status"], "captured")
         self.assertFalse((self.episode / "raw.zarr").exists())
+        progress = CountingProgress()
+        progress.episode("episode_000000")
         with patch("bimanual_teleop.devices.tianji.model.TianjiKinematics",
                    return_value=self.kine):
-            self.assertEqual(finalize_episode(self.episode), "complete")
+            self.assertEqual(finalize_episode(self.episode, progress=progress), "complete")
+        self.assertEqual(progress.totals, [8])
+        self.assertEqual(progress.advanced, progress.totals)
         document = json.loads((self.episode / "episode.json").read_text())
         self.assertEqual(document["status"], "complete")
         raw = zarr.open_group(str(self.episode / "raw.zarr"), mode="r")
@@ -138,7 +143,7 @@ class RecordingSpoolTests(unittest.TestCase):
         (root / "a/episode_000000/raw_spool/inner").mkdir(parents=True)
         (root / "a/episode_000000/raw_spool/inner/episode.json").write_text("{}")
         seen = []
-        def fake(path, sdk_root=None):
+        def fake(path, sdk_root=None, progress=None):
             seen.append(Path(path).relative_to(root).as_posix())
             if seen[-1] == "a/episode_000000":
                 raise ValueError("broken spool")

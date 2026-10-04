@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 import yaml
 
 from bimanual_teleop.common.console import (
-    LiveProgress, StatusConsole, configure_runtime_logging, format_message, runtime_message,
+    EpisodeProgress, LiveProgress, StatusConsole, configure_runtime_logging, format_message, runtime_message,
 )
 from bimanual_teleop.common.runlog import RuntimeLog
 
@@ -130,6 +130,17 @@ class ConsoleBehaviorTests(unittest.TestCase):
         redirected = io.StringIO()
         LiveProgress(stream=redirected).update("不应输出")
         self.assertEqual(redirected.getvalue(), "")
+
+    def test_episode_progress_draws_only_on_a_terminal(self):
+        for stream, drawn in ((TtyBuffer(), True), (io.StringIO(), False)):
+            with self.subTest(drawn=drawn), EpisodeProgress("整理条目", stream=stream) as progress:
+                progress.start(2)
+                progress.episode("session/episode_000000")
+                progress.total(10)
+                progress.advance(10)
+                progress.finish_episode()
+            self.assertEqual("整理条目" in stream.getvalue(), drawn)
+            self.assertEqual("1/2" in stream.getvalue(), drawn)
 
     def test_wuji_sdk_defaults_to_errors_without_duplicate_handlers(self):
         sdk = SimpleNamespace(set_log_level=Mock())

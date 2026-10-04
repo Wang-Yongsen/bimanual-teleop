@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
+from bimanual_teleop.common.console import EpisodeProgress
 
 STATE_GAP_NS = 50_000_000
 COMMAND_AGE_NS = 50_000_000
@@ -317,7 +318,7 @@ def _image_array(data, key, total, shape, dtype):
     return array
 
 
-def _copy_video(path, expected_count, source_rows, data, key, offset):
+def _copy_video(path, expected_count, source_rows, data, key, offset, progress):
     import av
     import numpy as np
 
@@ -329,6 +330,7 @@ def _copy_video(path, expected_count, source_rows, data, key, offset):
     with av.open(str(path)) as container:
         for index, frame in enumerate(container.decode(video=0)):
             count += 1
+            progress.advance()
             if index not in destinations:
                 continue
             rgb = frame.to_ndarray(format="rgb24")
@@ -342,7 +344,8 @@ def _copy_video(path, expected_count, source_rows, data, key, offset):
         raise ValueError(f"{path}: decoded {count} frames, timestamp table has {expected_count}")
 
 
-def _convert_episode(episode, descriptor, raw, output, action_space, report, source_name, *, include_depth, config=None):
+def _convert_episode(episode, descriptor, raw, output, action_space, report, source_name, *, include_depth, config=None,
+                     progress):
     import numpy as np
 
     start, end = descriptor["start_ns"], descriptor["end_ns"]
@@ -474,14 +477,16 @@ def _convert_episode(episode, descriptor, raw, output, action_space, report, sou
         report["camera_repairs"] = [dict(camera=f"camera_{i}", reused_frames=int(image_reused[i][keep].sum()),
                                          reused_ratio=float(image_reused[i][keep].mean()),
                                          max_image_age_ms=float(np.maximum(-image_offsets[i][keep], 0).max() / 1e6)) for i in range(3)]
+    progress.total(sum(camera.raw_count for camera in cameras) + (len(keep) if depth is not None else 0))
     for i, camera in enumerate(cameras):
         _copy_video(episode / f"camera_{i}.mp4", camera.raw_count, image_rows[i][keep],
-                    data, f"camera_{i}", offset)
+                    data, f"camera_{i}", offset, progress)
     if depth is not None:
         source = raw["cameras/camera_0/depth/image"]
         target = _image_array(data, "camera_0_depth", offset + len(keep), source.shape[1:], source.dtype)
         for i, row in enumerate(depth_rows[keep]):
             target[offset + i] = source[int(row)]
+            progress.advance()
     result = []
     for run in runs:
         length = len(run)
@@ -493,7 +498,8 @@ def _convert_episode(episode, descriptor, raw, output, action_space, report, sou
     return result
 
 
-def convert_recordings(input_path, output_path, *, action_space, include_depth=False, conversion_config=None):
+def convert_recordings(input_path, output_path, *, action_space, include_depth=False, conversion_config=None,
+                       progress=None):
     """Create a new dataset; never overwrite an existing file or directory.
 
     Episode bounds are [start_ns,end_ns). Without conversion_config, state
@@ -504,6 +510,7 @@ def convert_recordings(input_path, output_path, *, action_space, include_depth=F
     Depth is ignored unless explicitly included. episode_ends counts source
     demonstrations; segment_ends marks continuous runs for training sampling.
     Returns the quality report, also stored in meta.attrs['quality_report'].
+    ``progress`` counts decoded RGB frames plus copied depth frames.
     """
     import numpy as np
     import zarr
@@ -521,6 +528,8 @@ def convert_recordings(input_path, output_path, *, action_space, include_depth=F
     manifests = [source / "episode.json"] if (source / "episode.json").is_file() else sorted(source.rglob("episode.json"))
     if not manifests:
         raise ValueError(f"No episode.json found under {source}")
+    progress = EpisodeProgress(enabled=False) if progress is None else progress
+    progress.start(len(manifests))
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{destination.name}.converting-", dir=destination.parent))
     report = {"episodes": [], "action_space": action_space, "include_depth": include_depth,
@@ -538,6 +547,7 @@ def convert_recordings(input_path, output_path, *, action_space, include_depth=F
             item = {"source_episode": name, "status": descriptor.get("status", "unknown")}
             report["episodes"].append(item)
             if item["status"] != "complete":
+                progress.finish_episode()
                 continue
             if descriptor.get("schema_version") != 1:
                 raise ValueError(f"Unsupported raw schema in {manifest}")
@@ -547,11 +557,13 @@ def convert_recordings(input_path, output_path, *, action_space, include_depth=F
                 raise ValueError("Complete episodes must consistently include or omit camera_0 depth")
             has_depth = this_depth
             item["metadata"] = descriptor.get("metadata", raw.attrs.get("metadata", {}))
+            progress.episode(manifest.parent.name if name == "." else name)
             runs = _convert_episode(manifest.parent, descriptor, raw, output, action_space, item, name,
-                                    include_depth=include_depth, config=config)
+                                    include_depth=include_depth, config=config, progress=progress)
             segments.extend(runs)
             if runs:
                 episode_ends.append(runs[-1]["output_end"])
+            progress.finish_episode()
         if not segments:
             raise ValueError("No valid frames in complete episodes")
         ends = np.asarray(episode_ends, dtype=np.int64)

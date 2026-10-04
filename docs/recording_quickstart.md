@@ -45,6 +45,8 @@ S、X、Q 和等待时间都在 `configs/recording.yaml` 的 `controls` 与 `sta
 python scripts/finalize_recording.py --input recordings/<session>
 ```
 
+在终端中运行时，整理和转换都会显示两行进度：已处理条目数，以及当前条目已处理的相机帧数和预计剩余时间。输出被重定向到文件或管道时不显示进度条。
+
 `--input` 可以是任意目录，例如整个 `recordings/`。程序会找出它下面所有层级的条目逐条整理；某一条失败时会打印原因并继续处理其余条目，最后以非零退出码结束。状态为 `discarded`（按 X 作废）的条目会被**直接删除整个目录**，不可恢复；`failed` 条目保留以便排查。
 
 整理过程会校验计数和时间序列、计算双臂正运动学、压缩深度与低维数据，并生成现有格式：
