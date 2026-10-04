@@ -45,6 +45,8 @@ S、X、Q 和等待时间都在 `configs/recording.yaml` 的 `controls` 与 `sta
 python scripts/finalize_recording.py --input recordings/<session>
 ```
 
+`--input` 可以是任意目录，例如整个 `recordings/`。程序会找出它下面所有层级的条目逐条整理；某一条失败时会打印原因并继续处理其余条目，最后以非零退出码结束。状态为 `discarded`（按 X 作废）的条目会被**直接删除整个目录**，不可恢复；`failed` 条目保留以便排查。
+
 整理过程会校验计数和时间序列、计算双臂正运动学、压缩深度与低维数据，并生成现有格式：
 
 ```text
@@ -54,10 +56,16 @@ recordings/<session>/episode_000000/
   camera_1.mp4
   camera_2.mp4
   raw.zarr/
-  raw_spool/
+  raw_spool -> raw_spools/<session>/episode_000000   # 符号链接
 ```
 
-只有 `episode.json` 中状态为 `complete` 的条目可以转换为训练数据。`raw_spool/` 用于复核和重新整理，确认最终数据后可按项目的数据保留策略归档。
+只有 `episode.json` 中状态为 `complete` 的条目可以转换为训练数据。整理成功后，`raw_spool/` 会被移到 `--spool-archive` 指定的目录（默认当前目录下的 `raw_spools/`），条目内只留下符号链接，`recordings/` 只保存转换需要的数据。`raw_spools/` 只用于复核和重新整理，可以放到其他磁盘：
+
+```bash
+python scripts/finalize_recording.py --input recordings/<session> --spool-archive /mnt/archive/raw_spools
+```
+
+要从 `raw_spool` 重新生成 `raw.zarr`，加 `--refinalize`。程序会把 `complete` 条目改回 `captured` 后重新整理；符号链接失效时按 `--spool-archive` 查找。
 
 ## 5. 转换训练数据
 
@@ -86,7 +94,7 @@ python scripts/convert_recording.py \
 - `finalizing`：正在离线整理。
 - `complete`：整理完成，可以转换。
 - `failed`：存在采集或写入故障，不能转换。
-- `discarded`：操作员作废，不能转换。
+- `discarded`：操作员作废，不能转换；运行 `finalize_recording.py` 时会被删除。
 
 ## 7. 故障恢复
 

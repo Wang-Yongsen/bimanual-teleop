@@ -53,7 +53,9 @@ recordings/<session>/episode_000000/
 python scripts/finalize_recording.py --input recordings/<session>
 ```
 
-整理完成后增加现有兼容格式：
+`--input` 下所有层级的条目都会被整理，条目内部和以 `.` 开头的临时目录不再向下搜索。单条失败不会中断其余条目。`discarded` 条目在这一步被删除整个目录。
+
+整理完成后增加现有兼容格式，并把 `raw_spool/` 移出 `recordings/`：
 
 ```text
 recordings/<session>/episode_000000/
@@ -62,8 +64,18 @@ recordings/<session>/episode_000000/
   camera_1.mp4
   camera_2.mp4
   raw.zarr/                 # status: complete 后发布
-  raw_spool/                # 保留以便复核或重新整理
+  raw_spool -> <spool-archive>/<session>/episode_000000   # 符号链接
 ```
+
+`--spool-archive` 默认是当前目录下的 `raw_spools/`，不得位于 `--input` 之内。转换只读 `raw.zarr` 和 MP4，不需要 `raw_spool`。跨文件系统时先完整复制、再删除原目录；中断后重新运行即可继续。已是 `complete` 但仍带真实 `raw_spool/` 目录的旧条目，再次运行时也会被归档。
+
+需要重新生成 `raw.zarr` 时（例如运动学或整理逻辑有改动）：
+
+```bash
+python scripts/finalize_recording.py --input recordings/<session> --refinalize
+```
+
+`--refinalize` 先经符号链接找到 `raw_spool`；链接丢失或失效时，按 `<spool-archive>/<session>/<episode>` 查找并重建链接。归档目录被整体搬走后，用 `--spool-archive` 指向新位置即可。找不到 spool 的条目保持 `complete` 并报失败；找到后条目先改回 `captured` 再整理，旧 `raw.zarr` 在新结果发布前保持不变。整理中途失败时条目停在 `captured` 并记录 `finalize_error`，修复后不加 `--refinalize` 重新运行即可。
 
 RGB 在线使用三路独立 NVENC H.264 编码；每个真实采集帧只编码一次，不复制帧凑 30 Hz。MP4 的播放时间不作为同步依据，真实时间先保存在原始分段，离线整理后写入对应 Zarr 表。深度在线顺序保存为原始 `uint16`，离线进行无损压缩；零值保持零值，乘相机 `depth_scale` 得米。深度不做空间重投影，内外参保存在 metadata。
 

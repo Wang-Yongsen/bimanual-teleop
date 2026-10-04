@@ -123,7 +123,8 @@ Hand2 双侧回零按先左后右执行，每侧到位并去使能后继续，�
 # 双臂双手遥操作，同时启用原始数据采集和共享相机预览
 python scripts/teleop_quest_tianji.py --record --viewer
 
-# 退出采集后先整理原始会话
+# 退出采集后先整理原始数据；递归处理所有层级的条目，并删除已作废条目
+# 成功后 raw_spool 移到 raw_spools/（--spool-archive），条目内留符号链接；--refinalize 重新整理
 python scripts/finalize_recording.py --input recordings/<session>
 
 # 再分别导出两种动作空间；输出路径不得已存在

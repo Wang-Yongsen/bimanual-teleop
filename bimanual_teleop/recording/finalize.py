@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,8 @@ import shutil
 from .sink import Record, STREAM_FIELDS
 from .spool import CAMERA_META, NUMERIC_STRUCTS
 from .storage import EpisodeWriter, write_json
+
+SPOOL = "raw_spool"
 
 
 def _records_from_numeric(path, stream):
@@ -49,7 +52,7 @@ def _video_frame_count(path):
 
 
 def _append_spool(writer, episode, document):
-    raw = episode / "raw_spool"
+    raw = episode / SPOOL
     for stream in STREAM_FIELDS:
         path = raw / "streams" / (stream.replace("/", "__") + ".bin")
         if not path.is_file():
@@ -152,19 +155,129 @@ def finalize_episode(path, *, sdk_root=None):
         raise
 
 
-def finalize_recordings(path, *, sdk_root=None):
+def find_episodes(path):
+    """Episode directories at any depth below ``path``, including ``path`` itself.
+
+    An episode's own contents are not searched, and hidden directories such as
+    ``.episode_000000.finalizing-<pid>`` left by an interrupted run are skipped.
+    """
     source = Path(path).resolve()
-    manifests = [source / "episode.json"] if (source / "episode.json").is_file() else sorted(
-        source.rglob("episode.json"))
-    if not manifests:
-        raise ValueError(f"未找到 episode.json：{source}")
-    report = {"complete": 0, "skipped": 0, "episodes": []}
-    for manifest in manifests:
-        document = json.loads(manifest.read_text(encoding="utf-8"))
-        if document.get("status") not in ("captured", "finalizing", "complete"):
-            report["skipped"] += 1
+    if not source.is_dir():
+        raise ValueError(f"输入不是目录：{source}")
+    episodes = []
+    for directory, children, files in os.walk(source):
+        if "episode.json" in files:
+            episodes.append(Path(directory))
+            children.clear()
             continue
-        status = finalize_episode(manifest.parent, sdk_root=sdk_root)
+        children[:] = sorted(name for name in children if not name.startswith("."))
+    return sorted(episodes)
+
+
+def archived_spool(episode, archive):
+    """Where ``archive_spool`` keeps an episode's spool: ``<archive>/<session>/<episode>``."""
+    episode = Path(episode)
+    return Path(archive).expanduser().resolve() / episode.parent.name / episode.name
+
+
+def _file_sizes(root):
+    return sorted((path.relative_to(root).as_posix(), path.stat().st_size)
+                  for path in Path(root).rglob("*") if path.is_file())
+
+
+def archive_spool(episode, archive):
+    """Move a finalized raw_spool to the archive and leave a symlink in its place.
+
+    Returns whether a new link was made. The spool leaves the episode only after
+    the archive copy is complete, so an interrupted run is resumed by rerunning.
+    """
+    episode = Path(episode)
+    link = episode / SPOOL
+    target = archived_spool(episode, archive)
+    archived = False
+    if not link.is_symlink():
+        if link.is_dir():
+            if target.exists():
+                if _file_sizes(target) != _file_sizes(link):
+                    raise ValueError(f"归档位置已有不同内容：{target}")
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.rename(link, target)
+                except OSError as error:
+                    if error.errno != errno.EXDEV:
+                        raise
+                    staging = target.with_name(f".{target.name}.archiving-{os.getpid()}")
+                    shutil.rmtree(staging, ignore_errors=True)
+                    shutil.copytree(link, staging)
+                    os.replace(staging, target)
+            if link.is_dir():
+                os.replace(link, episode / f".{SPOOL}.archived-{os.getpid()}")
+        elif not target.is_dir():
+            return False
+        link.symlink_to(target, target_is_directory=True)
+        archived = True
+    for leftover in episode.glob(f".{SPOOL}.archived-*"):
+        shutil.rmtree(leftover)
+    return archived
+
+
+def _restore_spool(episode, archive):
+    link = episode / SPOOL
+    if link.is_dir():
+        return
+    target = None if archive is None else archived_spool(episode, archive)
+    if target is None or not target.is_dir():
+        where = "" if target is None else f"，归档目录中也没有 {target}"
+        raise ValueError(f"找不到 {SPOOL}：{link}{where}")
+    if link.is_symlink():
+        link.unlink()
+    link.symlink_to(target, target_is_directory=True)
+
+
+def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=False):
+    """Finalize every episode below ``path``.
+
+    With ``spool_archive`` each complete episode's raw_spool moves out of the
+    recording tree. With ``refinalize`` complete episodes are reset to captured
+    and rebuilt from their spool, followed through the symlink or found again
+    under ``spool_archive``; a missing spool leaves the episode complete.
+    """
+    source = Path(path).resolve()
+    episodes = find_episodes(source)
+    if not episodes:
+        raise ValueError(f"未找到 episode.json：{source}")
+    if spool_archive is not None:
+        archive = Path(spool_archive).expanduser().resolve()
+        if archive == source or source in archive.parents:
+            raise ValueError(f"{SPOOL} 归档目录不能位于输入目录内：{archive}")
+    report = {"complete": 0, "discarded": 0, "skipped": 0, "failed": 0,
+              "episodes": [], "deleted": [], "archived": [], "errors": []}
+    for episode in episodes:
+        try:
+            manifest = episode / "episode.json"
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+            status = document.get("status")
+            if status == "discarded":
+                shutil.rmtree(episode)
+                report["discarded"] += 1
+                report["deleted"].append(str(episode))
+                continue
+            if status not in ("captured", "finalizing", "complete"):
+                report["skipped"] += 1
+                continue
+            if status != "complete" or refinalize:
+                _restore_spool(episode, spool_archive)
+            if status == "complete" and refinalize:
+                document["status"] = "captured"
+                write_json(manifest, document)
+            status = finalize_episode(episode, sdk_root=sdk_root)
+            if status == "complete" and spool_archive is not None and archive_spool(episode, spool_archive):
+                report["archived"].append(str(episode))
+        except (OSError, ValueError, KeyError, ImportError, RuntimeError) as error:
+            report["failed"] += 1
+            report["errors"].append((str(episode), str(error)))
+            continue
         report["complete"] += status == "complete"
-        report["episodes"].append(str(manifest.parent))
+        report["episodes"].append(str(episode))
     return report

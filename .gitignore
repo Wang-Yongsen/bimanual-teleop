@@ -49,6 +49,7 @@ local.properties
 
 # Local demonstration datasets
 /recordings/
+/raw_spools/
 /datasets/
-# /logs/
+/logs/
 
