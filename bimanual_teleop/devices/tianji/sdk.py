@@ -320,6 +320,14 @@ class ControlSDK:
     def engage(self, mask, targets, expiry):
         return self.submit(mask, targets, expiry, engage=True)
 
+    def engage_position(self, mask, targets, expiry):
+        """Seed selected arms and request POSITION in one official submission."""
+        def build():
+            for index, arm in self._arms(mask):
+                self._require(self.robot.set_joint_cmd_pose(arm, list(targets[index*7:index*7+7])), "position seed")
+                self._require(self.robot.set_state(arm, 1), "position mode")
+        return self._command(build, expiry)
+
     def move_joints(self, index, target, velocity, acceleration, expiry):
         arm = self._arms(1 << index)[0][1]
         def build():

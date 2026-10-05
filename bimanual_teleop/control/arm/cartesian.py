@@ -76,7 +76,10 @@ class TianjiCartesianExecutor:
             servos[side] = servo
         return reference, poses, servos
 
-    def engage(self) -> None:
+    def engage(self, *, control_mode: str = "cartesian") -> None:
+        """Keep the same constrained Cartesian planner for either driver mode."""
+        if control_mode not in ("cartesian", "position"):
+            raise ValueError("control_mode must be cartesian or position")
         generation = self._generation
         profile = self.driver.profile
         sample = self.driver.get_latest()
@@ -85,7 +88,10 @@ class TianjiCartesianExecutor:
         if not self.driver.health().ready:
             raise RuntimeError("feedback is not ready for engagement")
         self._resolve_reference(sample)
-        self.driver.engage()
+        if control_mode == "position":
+            self.driver.engage(control_mode="position")
+        else:
+            self.driver.engage()
         try:
             sample = self.driver.engagement_sample
             if sample is None:

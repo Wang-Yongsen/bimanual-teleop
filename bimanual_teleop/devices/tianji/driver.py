@@ -783,8 +783,10 @@ class TianjiDriver:
                 self._moving_side = None
                 self._command_cancel = None
 
-    def engage(self) -> None:
-        """Seed Cartesian impedance control from fresh measured joints."""
+    def engage(self, *, control_mode: str = "cartesian") -> None:
+        """Seed Cartesian impedance or position streaming from measured joints."""
+        if control_mode not in ("cartesian", "position"):
+            raise ValueError("control_mode must be cartesian or position")
         with self._lock:
             self._connected()
             if self.profile is None:
@@ -799,8 +801,9 @@ class TianjiDriver:
                                     (sample.header.ref,), now, now + self.engagement_timeout_ns, self.profile.profile_id)
             self._motion_fault = None
             self._mode_confirmed = False
-            self._control_mode = "cartesian"
-            result = self._send_command(command, "engage")
+            self._control_mode = control_mode
+            operation = "engage_position" if control_mode == "position" else "engage"
+            result = self._send_command(command, operation)
             if not result.accepted:
                 raise RuntimeError(result.reason)
             # The accepted seed begins a new motion episode. A later mode
@@ -820,7 +823,7 @@ class TianjiDriver:
                     self.profile.active_arms, time.monotonic_ns())
                 if reason:
                     self.request_hold(reason)
-                    raise RuntimeError(f"Cannot confirm cartesian engagement: {reason}")
+                    raise RuntimeError(f"Cannot confirm {control_mode} engagement: {reason}")
                 latest = self.get_latest()
                 if all(self._advanced.get(side, 0) >= now and self._in_control_mode(latest.payload.arms[side])
                        for side in self.profile.active_arms):
@@ -832,13 +835,13 @@ class TianjiDriver:
                     self._mode_confirmed = True
                     self._event("tianji.engagement_mode_reported", {"packet_index": latest.payload.packet_index,
                                                                  "command_id": command.command_id,
-                                                                 "control_mode": "cartesian",
+                                                                 "control_mode": control_mode,
                                                                  "elapsed_ms": (confirmed_ns - now) / 1e6,
                                                                  "first_target_deadline_ns": self._deadline_ns})
                     return
                 self._stop.wait(0.001)
             self.request_hold("Engagement mode was not reported before the startup deadline")
-            raise RuntimeError("Controller did not confirm cartesian engagement before startup timeout")
+            raise RuntimeError(f"Controller did not confirm {control_mode} engagement before startup timeout")
 
     def submit(self, command: DeviceCommand[TianjiJointCommand]) -> Submission:
         with self._lock:
@@ -888,7 +891,7 @@ class TianjiDriver:
         # watchdog gets its full interval; IK time must not shorten the interval
         # in which the next target is allowed to arrive.
         self._deadline_ns = (min(command.expires_monotonic_ns, now + self.engagement_timeout_ns)
-                             if operation == "engage" else accepted_ns + self.watchdog_ns)
+                             if operation in ("engage", "engage_position") else accepted_ns + self.watchdog_ns)
         self._last_target_ns = accepted_ns
         self._last_command_id = command.command_id
         return Submission(command.command_id, True)
