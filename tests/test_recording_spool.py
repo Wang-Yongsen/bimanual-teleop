@@ -18,7 +18,7 @@ from bimanual_teleop.recording.sink import Record
 from bimanual_teleop.recording.spool import (
     NVENCVideo, RawEpisodeWriter, SharedFrameRing, _release, preflight_nvenc)
 from bimanual_teleop.recording.storage import RGBVideo
-from tests.test_recording_conversion import CountingProgress
+from tests.support.recording import CountingProgress
 from tests.test_recording_storage import _Kinematics
 
 

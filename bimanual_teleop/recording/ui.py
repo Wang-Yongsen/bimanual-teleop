@@ -4,6 +4,8 @@ import time
 
 from bimanual_teleop.cli.runtime import TeleopUI
 
+from .episodes import COMPLETE, DISCARDED, FAILED
+
 
 def recording_help(config):
     delay = config.start_delay_s
@@ -51,13 +53,13 @@ class RecordingUI(TeleopUI):
                 return
             return
         if key == self.save_key:
-            self.recorder.end(status="complete")
+            self.recorder.end(status=COMPLETE)
             return
         if key == self.discard_key:
-            self.recorder.end(status="discarded")
+            self.recorder.end(status=DISCARDED)
             return
         if key == self.quit_key or key in ("\x04", "\x03"):
-            self.recorder.end(status="complete")
+            self.recorder.end(status=COMPLETE)
             super().handle("q" if key == self.quit_key else key)
             return
         super().handle(key)
@@ -113,7 +115,7 @@ class RecordingUI(TeleopUI):
         error = self.recorder.poll()
         if error and error != self._reported_recording_error:
             self._reported_recording_error = error
-            self.recorder.end(status="failed", reason=error)
+            self.recorder.end(status=FAILED, reason=error)
             if self.runtime_log is not None:
                 self.runtime_log.event("recording_failure", error=error,
                                        recorder=self.recorder.status())
@@ -135,7 +137,7 @@ class RecordingUI(TeleopUI):
         self._sync_recording()
 
     def close(self):
-        self.recorder.end(status="failed", reason="遥操作退出")
+        self.recorder.end(status=FAILED, reason="遥操作退出")
         try:
             super().close()
         finally:

@@ -5,6 +5,7 @@ from queue import Empty, Full, Queue
 import threading
 import time
 
+from .schema import CAMERA_FPS, CAMERAS, IMAGE_HEIGHT, IMAGE_WIDTH, MAIN_CAMERA
 from .sink import Record
 
 
@@ -50,8 +51,8 @@ class CameraRig:
         self._last, self._warm = {}, {}
         self._accepted, self._delivered, self._discarded = {}, {}, {}
         self._queue_full_count = 0
-        self._required = tuple((f"camera_{i}", kind) for i in range(3)
-                               for kind in (("rgb", "depth") if i == 0 and config.main_depth
+        self._required = tuple((camera, kind) for camera in CAMERAS
+                               for kind in (("rgb", "depth") if camera == MAIN_CAMERA and config.main_depth
                                             else ("rgb",)))
         self._bridge = self._np = None
         self._started = False
@@ -96,18 +97,22 @@ class CameraRig:
                 for sensor in device.query_sensors():
                     if sensor.supports(self.rs.option.global_time_enabled):
                         sensor.set_option(self.rs.option.global_time_enabled, 1.)
-                name, depth = f"camera_{index}", index == 0 and self.config.main_depth
+                name = CAMERAS[index]
+                depth = name == MAIN_CAMERA and self.config.main_depth
                 pipeline = self.rs.pipeline(context)
                 settings = self.rs.config()
                 settings.enable_device(serial)
-                settings.enable_stream(self.rs.stream.color, 640, 480, self.rs.format.rgb8, 30)
+                settings.enable_stream(self.rs.stream.color, IMAGE_WIDTH, IMAGE_HEIGHT,
+                                       self.rs.format.rgb8, CAMERA_FPS)
                 if depth:
-                    settings.enable_stream(self.rs.stream.depth, 640, 480, self.rs.format.z16, 30)
+                    settings.enable_stream(self.rs.stream.depth, IMAGE_WIDTH, IMAGE_HEIGHT,
+                                           self.rs.format.z16, CAMERA_FPS)
                 self._pipelines.append(pipeline)
                 profile = pipeline.start(settings)
                 color = profile.get_stream(self.rs.stream.color)
                 info = {"serial": serial, "model": device.get_info(self.rs.camera_info.name),
-                        "resolution": [640, 480], "fps": 30, "rgb_intrinsics": _intrinsics(color)}
+                        "resolution": [IMAGE_WIDTH, IMAGE_HEIGHT], "fps": CAMERA_FPS,
+                        "rgb_intrinsics": _intrinsics(color)}
                 if depth:
                     depth_profile = profile.get_stream(self.rs.stream.depth)
                     extrinsics = depth_profile.get_extrinsics_to(color)

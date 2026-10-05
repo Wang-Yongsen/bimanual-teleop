@@ -16,7 +16,7 @@ import numpy as np
 import zarr
 
 from bimanual_teleop.recording.config import RecordingConfig, load_config
-from bimanual_teleop.recording.convert import _read_stream
+from bimanual_teleop.recording.plan import read_stream
 from bimanual_teleop.recording.recorder import Recorder, _lower_priority, _worker
 from bimanual_teleop.recording.sink import COMMAND_STREAMS, STATE_STREAMS, Record
 from bimanual_teleop.recording.storage import EpisodeWriter
@@ -171,7 +171,7 @@ class RecordingLifecycleTests(unittest.TestCase):
         raw = zarr.open_group(str(self.path / "raw.zarr"), mode="r")
         self.assertEqual(raw["hands/right/time_ns"][:].tolist(), [1001, 1005])
         # Raw may retain a previously written tail; conversion must honor the manifest window.
-        selected = _read_stream(raw, "hands/left", {"joint_pos": 20}, 1000, 1010)
+        selected = read_stream(raw, "hands/left", {"joint_pos": 20}, 1000, 1010)
         self.assertEqual(selected.times.tolist(), [1001])
         self.assertNotIn(1030, raw["hands/left/time_ns"][:])
         connection.send(("close",))

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import errno
-import json
+import math
 import os
 from pathlib import Path
 import shutil
 
 from bimanual_teleop.common.console import EpisodeProgress
 
-from .sink import Record, STREAM_FIELDS
-from .spool import CAMERA_META, NUMERIC_STRUCTS
+from .episodes import (CAPTURED, COMPLETE, DISCARDED, FAILED, FINALIZING, MANIFEST,
+                       episode_label, find_episodes, read_manifest)
+from .schema import CAMERAS, DEPTH_SHAPE, DEPTH_STREAM, MAIN_CAMERA, RGB_STREAMS, STREAM_FIELDS, rgb_stream
+from .sink import Record
+from .spool import CAMERA_META, NUMERIC_STRUCTS, camera_meta_path, depth_image_path, numeric_path
 from .storage import EpisodeWriter, write_json
 
 SPOOL = "raw_spool"
@@ -60,7 +63,7 @@ def _video_frame_count(path, progress):
 def _append_spool(writer, episode, document, progress):
     raw = episode / SPOOL
     for stream in STREAM_FIELDS:
-        path = raw / "streams" / (stream.replace("/", "__") + ".bin")
+        path = numeric_path(raw, stream)
         if not path.is_file():
             continue
         previous = None
@@ -69,10 +72,9 @@ def _append_spool(writer, episode, document, progress):
                 raise ValueError(f"低维序号未严格递增：{stream}")
             previous = record.sequence
             writer.append(record)
-    for index in range(3):
-        camera = f"camera_{index}"
-        stream = f"cameras/{camera}/rgb"
-        metadata = raw / "cameras" / f"{camera}_rgb.bin"
+    for camera in CAMERAS:
+        stream = rgb_stream(camera)
+        metadata = camera_meta_path(raw, camera)
         video = episode / f"{camera}.mp4"
         if not metadata.is_file() or not video.is_file():
             raise ValueError(f"缺少 {camera} 视频或元数据")
@@ -85,25 +87,24 @@ def _append_spool(writer, episode, document, progress):
                 raise ValueError(f"相机序号未严格递增：{stream}")
             previous = record.sequence
             writer.append(record)
-    depth_meta = raw / "cameras" / "camera_0_depth.bin"
-    depth_raw = raw / "cameras" / "camera_0_depth.raw"
+    depth_meta = camera_meta_path(raw, MAIN_CAMERA, "depth")
+    depth_raw = depth_image_path(raw)
     if depth_meta.exists() != depth_raw.exists():
         raise ValueError("深度图像与深度元数据必须同时存在")
     if depth_meta.is_file():
         import numpy as np
-        frame_bytes = 480 * 640 * 2
-        stream = "cameras/camera_0/depth"
+        frame_bytes = math.prod(DEPTH_SHAPE) * 2
         previous = None
         with depth_raw.open("rb") as images:
-            for record in _camera_records(depth_meta, stream):
+            for record in _camera_records(depth_meta, DEPTH_STREAM):
                 if previous is not None and record.sequence <= previous:
-                    raise ValueError(f"相机序号未严格递增：{stream}")
+                    raise ValueError(f"相机序号未严格递增：{DEPTH_STREAM}")
                 previous = record.sequence
                 payload = images.read(frame_bytes)
                 if len(payload) != frame_bytes:
                     raise ValueError("深度图像分段尾部不完整")
-                image = np.frombuffer(payload, dtype="<u2").reshape(480, 640).copy()
-                writer.append(Record(stream, record.time_ns, record.sequence,
+                image = np.frombuffer(payload, dtype="<u2").reshape(DEPTH_SHAPE).copy()
+                writer.append(Record(DEPTH_STREAM, record.time_ns, record.sequence,
                     {**record.values, "image": image}))
                 progress.advance()
             if images.read(1):
@@ -121,20 +122,19 @@ def finalize_episode(path, *, sdk_root=None, progress=None):
     """
     progress = EpisodeProgress(enabled=False) if progress is None else progress
     episode = Path(path).resolve()
-    manifest = episode / "episode.json"
+    manifest = episode / MANIFEST
     if not manifest.is_file():
         raise ValueError(f"缺少 episode.json：{episode}")
-    document = json.loads(manifest.read_text(encoding="utf-8"))
-    if document.get("status") == "complete":
-        return "complete"
-    if document.get("status") not in ("captured", "finalizing"):
+    document = read_manifest(episode)
+    if document.get("status") == COMPLETE:
+        return COMPLETE
+    if document.get("status") not in (CAPTURED, FINALIZING):
         raise ValueError(f"条目状态不可整理：{document.get('status')} ({episode})")
-    document["status"] = "finalizing"
+    document["status"] = FINALIZING
     document.pop("finalize_error", None)
     write_json(manifest, document)
     counts = document.get("counts", {})
-    progress.total(sum(counts.get(stream, 0) for stream in
-                       [f"cameras/camera_{i}/rgb" for i in range(3)] + ["cameras/camera_0/depth"]))
+    progress.total(sum(counts.get(stream, 0) for stream in RGB_STREAMS + (DEPTH_STREAM,)))
     temporary = episode.parent / f".{episode.name}.finalizing-{os.getpid()}"
     if temporary.exists():
         shutil.rmtree(temporary)
@@ -147,46 +147,27 @@ def finalize_episode(path, *, sdk_root=None, progress=None):
             raise ValueError("离线整理使用的天机运动学模型与采集时不一致")
         writer = EpisodeWriter(temporary, document["start_ns"], document["metadata"], kinematics)
         _append_spool(writer, episode, document, progress)
-        writer.close(document["end_ns"], status="complete")
+        writer.close(document["end_ns"], status=COMPLETE)
         destination = episode / "raw.zarr"
         if destination.exists():
             shutil.rmtree(destination)
         os.replace(temporary / "raw.zarr", destination)
-        os.replace(temporary / "episode.json", manifest)
+        os.replace(temporary / MANIFEST, manifest)
         temporary.rmdir()
-        return "complete"
+        return COMPLETE
     except BaseException as error:
         if writer is not None and temporary.exists():
             try:
                 writer.close(document.get("end_ns") or document["start_ns"],
-                             status="failed", reason=str(error))
+                             status=FAILED, reason=str(error))
             except BaseException:
                 pass
         if temporary.exists():
             shutil.rmtree(temporary)
-        document["status"] = "captured"
+        document["status"] = CAPTURED
         document["finalize_error"] = str(error)
         write_json(manifest, document)
         raise
-
-
-def find_episodes(path):
-    """Episode directories at any depth below ``path``, including ``path`` itself.
-
-    An episode's own contents are not searched, and hidden directories such as
-    ``.episode_000000.finalizing-<pid>`` left by an interrupted run are skipped.
-    """
-    source = Path(path).resolve()
-    if not source.is_dir():
-        raise ValueError(f"输入不是目录：{source}")
-    episodes = []
-    for directory, children, files in os.walk(source):
-        if "episode.json" in files:
-            episodes.append(Path(directory))
-            children.clear()
-            continue
-        children[:] = sorted(name for name in children if not name.startswith("."))
-    return sorted(episodes)
 
 
 def archived_spool(episode, archive):
@@ -271,27 +252,26 @@ def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=F
               "episodes": [], "deleted": [], "archived": [], "errors": []}
     progress.start(len(episodes))
     for episode in episodes:
-        label = episode.name if episode == source else episode.relative_to(source).as_posix()
+        label = episode_label(episode, source)
         progress.episode(label)
         try:
-            manifest = episode / "episode.json"
-            document = json.loads(manifest.read_text(encoding="utf-8"))
+            document = read_manifest(episode)
             status = document.get("status")
-            if status == "discarded":
+            if status == DISCARDED:
                 shutil.rmtree(episode)
                 report["discarded"] += 1
                 report["deleted"].append(str(episode))
                 continue
-            if status not in ("captured", "finalizing", "complete"):
+            if status not in (CAPTURED, FINALIZING, COMPLETE):
                 report["skipped"] += 1
                 continue
-            if status != "complete" or refinalize:
+            if status != COMPLETE or refinalize:
                 _restore_spool(episode, spool_archive)
-            if status == "complete" and refinalize:
-                document["status"] = "captured"
-                write_json(manifest, document)
+            if status == COMPLETE and refinalize:
+                document["status"] = CAPTURED
+                write_json(episode / MANIFEST, document)
             status = finalize_episode(episode, sdk_root=sdk_root, progress=progress)
-            if status == "complete" and spool_archive is not None:
+            if status == COMPLETE and spool_archive is not None:
                 progress.episode(f"{label}：归档 {SPOOL}")
                 if archive_spool(episode, spool_archive):
                     report["archived"].append(str(episode))
@@ -301,6 +281,6 @@ def finalize_recordings(path, *, sdk_root=None, spool_archive=None, refinalize=F
             continue
         finally:
             progress.finish_episode()
-        report["complete"] += status == "complete"
+        report["complete"] += status == COMPLETE
         report["episodes"].append(str(episode))
     return report

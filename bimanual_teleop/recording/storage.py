@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import time
 
+from .episodes import COMPLETE, FAILED, RECORDING
+from .schema import CAMERA_FPS, IMAGE_HEIGHT, IMAGE_WIDTH
 from .sink import pose_values
 
 
@@ -18,8 +20,8 @@ class RGBVideo:
     def __init__(self, path):
         import av
         self.container = av.open(str(path), "w")
-        self.stream = self.container.add_stream("libx264", rate=30)
-        self.stream.width, self.stream.height = 640, 480
+        self.stream = self.container.add_stream("libx264", rate=CAMERA_FPS)
+        self.stream.width, self.stream.height = IMAGE_WIDTH, IMAGE_HEIGHT
         self.stream.pix_fmt = "yuv420p"
         # Three cameras are encoded serially in the lower-priority recording
         # process. Two codec threads provide enough measured headroom for
@@ -64,7 +66,7 @@ class EpisodeWriter:
         import zarr
         self.path = Path(path)
         self.path.mkdir(parents=True, exist_ok=False)
-        self.document = dict(schema_version=1, status="recording", start_ns=start_ns,
+        self.document = dict(schema_version=1, status=RECORDING, start_ns=start_ns,
                              end_ns=None, metadata=metadata)
         write_json(self.path / "episode.json", self.document)
         self.root = zarr.open_group(str(self.path / "raw.zarr"), mode="w")
@@ -155,7 +157,7 @@ class EpisodeWriter:
             "videos": {name: video.status() for name, video in self.videos.items()},
         }
 
-    def close(self, end_ns, status="complete", reason=None):
+    def close(self, end_ns, status=COMPLETE, reason=None):
         error = None
         for video in self.videos.values():
             try:
@@ -168,7 +170,7 @@ class EpisodeWriter:
                 self.flush(stream)
         except Exception as problem:
             error = problem
-        self.document.update(end_ns=end_ns, status="failed" if error else status,
+        self.document.update(end_ns=end_ns, status=FAILED if error else status,
                              reason=str(error) if error else reason, counts=self.counts)
         write_json(self.path / "episode.json", self.document)
         if error:

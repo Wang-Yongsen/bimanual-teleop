@@ -6,20 +6,7 @@ from queue import Empty, Full
 
 from bimanual_teleop.types import CommandEvent, CommandStatus, Event, JointState
 
-SIDES = ("left", "right")
-STATE_STREAMS = tuple(f"{kind}/{side}" for kind in ("arms", "hands") for side in SIDES)
-COMMAND_STREAMS = tuple(f"{kind}/{side}" for kind in ("arm_commands", "hand_commands") for side in SIDES)
-STREAMS = STATE_STREAMS + COMMAND_STREAMS
-STREAM_FIELDS = {
-    "arms/left": (("joint_pos", 7), ("wrench", 6)),
-    "arms/right": (("joint_pos", 7), ("wrench", 6)),
-    "hands/left": (("joint_pos", 20),),
-    "hands/right": (("joint_pos", 20),),
-    "arm_commands/left": (("joint_pos", 7), ("eef_pose", 7)),
-    "arm_commands/right": (("joint_pos", 7), ("eef_pose", 7)),
-    "hand_commands/left": (("joint_pos", 20),),
-    "hand_commands/right": (("joint_pos", 20),),
-}
+from .schema import COMMAND_STREAMS, SIDES, STATE_STREAMS, STREAM_FIELDS, STREAMS
 
 
 @dataclass(frozen=True)

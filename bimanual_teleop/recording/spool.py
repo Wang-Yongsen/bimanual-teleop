@@ -12,7 +12,10 @@ import subprocess
 import tempfile
 import time
 
-from .sink import Record, STREAM_FIELDS
+from .episodes import CAPTURED, CAPTURING, COMPLETE, FAILED
+from .schema import (CAMERA_FPS, DEPTH_SHAPE, DEPTH_STREAM, IMAGE_HEIGHT, IMAGE_WIDTH, MAIN_CAMERA,
+                     RGB_SHAPE, STREAM_FIELDS)
+from .sink import Record
 from .storage import write_json
 
 
@@ -27,6 +30,18 @@ NUMERIC_STRUCTS = {
     stream: struct.Struct("<qq" + "d" * sum(size for _name, size in fields))
     for stream, fields in STREAM_FIELDS.items()
 }
+
+
+def numeric_path(raw, stream):
+    return Path(raw) / "streams" / (stream.replace("/", "__") + ".bin")
+
+
+def camera_meta_path(raw, camera, kind="rgb"):
+    return Path(raw) / "cameras" / f"{camera}_{kind}.bin"
+
+
+def depth_image_path(raw):
+    return Path(raw) / "cameras" / f"{MAIN_CAMERA}_depth.raw"
 
 
 class SharedFrameRing:
@@ -130,8 +145,8 @@ class NVENCVideo:
     def __init__(self, path):
         import av
         self.container = av.open(str(path), "w")
-        self.stream = self.container.add_stream("h264_nvenc", rate=30)
-        self.stream.width, self.stream.height = 640, 480
+        self.stream = self.container.add_stream("h264_nvenc", rate=CAMERA_FPS)
+        self.stream.width, self.stream.height = IMAGE_WIDTH, IMAGE_HEIGHT
         self.stream.pix_fmt = "yuv420p"
         self.stream.options = {"preset": "p4", "cq": "21"}
         self.count = 0
@@ -238,7 +253,7 @@ def _preflight_worker(path, result):
     try:
         import numpy as np
         video = NVENCVideo(path)
-        frame = np.zeros((480, 640, 3), dtype="u1")
+        frame = np.zeros(RGB_SHAPE, dtype="u1")
         for _ in range(3):
             video.write(frame)
         video.close()
@@ -304,7 +319,7 @@ class RawEpisodeWriter:
         self.raw = self.path / "raw_spool"
         (self.raw / "streams").mkdir(parents=True)
         (self.raw / "cameras").mkdir()
-        self.document = dict(schema_version=2, status="capturing", start_ns=start_ns,
+        self.document = dict(schema_version=2, status=CAPTURING, start_ns=start_ns,
                              end_ns=None, metadata=metadata)
         write_json(self.path / "episode.json", self.document)
         self.context = context or mp.get_context("spawn")
@@ -328,8 +343,8 @@ class RawEpisodeWriter:
 
     def prepare_rgb(self, cameras):
         for camera in cameras:
-            ring = SharedFrameRing(self.context, (480, 640, 3), "u1", self.frame_capacity)
-            metadata = self.raw / "cameras" / f"{camera}_rgb.bin"
+            ring = SharedFrameRing(self.context, RGB_SHAPE, "u1", self.frame_capacity)
+            metadata = camera_meta_path(self.raw, camera)
             process = self.context.Process(target=_rgb_worker,
                 args=(ring, str(self.path / f"{camera}.mp4"), str(metadata)),
                 name=f"record-{camera}-nvenc")
@@ -337,11 +352,11 @@ class RawEpisodeWriter:
             self.rings[f"cameras/{camera}/rgb"] = ring
             self.processes[f"cameras/{camera}/rgb"] = process
         if self.document["metadata"]["recording"]["main_depth"]:
-            stream = "cameras/camera_0/depth"
-            ring = SharedFrameRing(self.context, (480, 640), "u2", self.frame_capacity)
+            stream = DEPTH_STREAM
+            ring = SharedFrameRing(self.context, DEPTH_SHAPE, "u2", self.frame_capacity)
             process = self.context.Process(target=_depth_worker, args=(ring,
-                str(self.raw / "cameras" / "camera_0_depth.raw"),
-                str(self.raw / "cameras" / "camera_0_depth.bin")),
+                str(depth_image_path(self.raw)),
+                str(camera_meta_path(self.raw, MAIN_CAMERA, "depth"))),
                 name="record-camera_0-depth")
             process.start()
             self.rings[stream] = ring
@@ -384,7 +399,7 @@ class RawEpisodeWriter:
         try:
             if not self._accept(record):
                 return
-            if record.stream == "cameras/camera_0/depth":
+            if record.stream == DEPTH_STREAM:
                 ring = self.rings[record.stream]
                 image = record.values["image"]
                 metadata = Record(record.stream, record.time_ns, record.sequence,
@@ -398,8 +413,7 @@ class RawEpisodeWriter:
             else:
                 output = self.files.get(record.stream)
                 if output is None:
-                    name = record.stream.replace("/", "__") + ".bin"
-                    output = self.files[record.stream] = (self.raw / "streams" / name).open(
+                    output = self.files[record.stream] = numeric_path(self.raw, record.stream).open(
                         "wb", buffering=1024 * 1024)
                 flattened = []
                 for name, size in STREAM_FIELDS[record.stream]:
@@ -424,7 +438,7 @@ class RawEpisodeWriter:
                         for stream, process in self.processes.items()},
         }
 
-    def close(self, end_ns, status="complete", reason=None):
+    def close(self, end_ns, status=COMPLETE, reason=None):
         if self._closed:
             return self.document.get("status", status)
         error = None
@@ -455,13 +469,13 @@ class RawEpisodeWriter:
                 error = error or RuntimeError(
                     f"{stream}: 生产 {expected}，持久化 {ring.processed.value}")
             ring.close_queues()
-        published = "failed" if error else "captured" if status == "complete" else status
+        published = FAILED if error else CAPTURED if status == COMPLETE else status
         self.document.update(end_ns=end_ns, status=published,
                              reason=str(error) if error else reason,
                              counts=dict(self.counts),
                              spool={"numeric_format": "little-endian int64,int64,float64[]",
                                     "camera_meta_format": "little-endian int64,int64,float64",
-                                    "depth_shape": [480, 640], "depth_dtype": "uint16"})
+                                    "depth_shape": list(DEPTH_SHAPE), "depth_dtype": "uint16"})
         write_json(self.path / "episode.json", self.document)
         self._closed = True
         if error:

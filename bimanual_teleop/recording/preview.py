@@ -1,9 +1,12 @@
 """Optional GUI with a bounded latest-image mailbox, separate from recording."""
 
+import math
 import multiprocessing as mp
 import os
 import signal
 import time
+
+from .schema import CAMERAS, RGB_SHAPE
 
 
 _PREVIEW_PERIOD_S = .2
@@ -19,13 +22,13 @@ def _lower_priority(increment=10):
 
 class _Images:
     def __init__(self, context):
-        self.pixels = context.RawArray("B", 3 * 480 * 640 * 3)
-        self.stamps = context.RawArray("q", 3)
+        self.pixels = context.RawArray("B", len(CAMERAS) * math.prod(RGB_SHAPE))
+        self.stamps = context.RawArray("q", len(CAMERAS))
         self.lock = context.Lock()
 
     def _array(self):
         import numpy as np
-        return np.frombuffer(self.pixels, dtype=np.uint8).reshape(3, 480, 640, 3)
+        return np.frombuffer(self.pixels, dtype=np.uint8).reshape(len(CAMERAS), *RGB_SHAPE)
 
     def publish(self, frames):
         # A stalled GUI may miss preview updates, never recording frames.
@@ -34,7 +37,7 @@ class _Images:
         try:
             pixels = self._array()
             for camera, image in frames.items():
-                index = int(camera.removeprefix("camera_"))
+                index = CAMERAS.index(camera)
                 pixels[index] = image
                 self.stamps[index] = time.monotonic_ns()
         finally:
@@ -60,12 +63,12 @@ def _run(images, stopped):
         import numpy as np
         if plt.get_backend().lower() == "agg":
             raise RuntimeError("录制预览需要桌面图形环境")
-        figure, axes = plt.subplots(1, 3, figsize=(15, 4))
+        figure, axes = plt.subplots(1, len(CAMERAS), figsize=(15, 4))
         artists = []
-        for index, axis in enumerate(axes):
-            axis.set_title(f"camera_{index}")
+        for camera, axis in zip(CAMERAS, axes):
+            axis.set_title(camera)
             axis.set_axis_off()
-            artists.append(axis.imshow(np.zeros((480, 640, 3), dtype="u1")))
+            artists.append(axis.imshow(np.zeros(RGB_SHAPE, dtype="u1")))
         plt.show(block=False)
         parent = mp.parent_process()
         while not stopped.is_set() and plt.fignum_exists(figure.number):

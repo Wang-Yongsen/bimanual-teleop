@@ -8,7 +8,7 @@ import numpy as np
 import zarr
 
 from bimanual_teleop.recording.convert import convert_recordings
-from tests.test_recording_conversion import make_episode, START_NS
+from tests.support.recording import make_episode, START_NS
 
 
 class RecordingRepairTests(unittest.TestCase):
@@ -107,6 +107,55 @@ class RecordingRepairTests(unittest.TestCase):
         reasons = report['episodes'][0]['invalid_reasons']
         self.assertGreater(reasons['left_robot_eef_pose_invalid_or_gap'], 0)
         self.assertGreater(reasons['right_robot_joint_invalid_or_gap'], 0)
+
+    def test_short_segments_are_left_out_and_reported(self):
+        times = np.arange(9) * 1000 / 30
+        make_episode(self.root / 'raw', main=times, other={1: times[[0, 1, 5, 6, 7, 8]]})
+        data, report = self.convert(min_segment_frames=3)
+        self.assertEqual(report['output_frames'], 4)
+        self.assertEqual(report['episodes'][0]['short_segments'], {'segments': 1, 'frames': 2})
+        np.testing.assert_array_equal(data['meta/segment_ends'][:], [4])
+        np.testing.assert_array_equal(data['meta/recording_time_ns'][:] - START_NS,
+                                      np.rint(times[5:] * 1e6).astype(np.int64))
+        with self.assertRaisesRegex(ValueError, 'min_segment_frames'):
+            self.convert(min_segment_frames=-1)
+
+    def test_strict_mode_from_config_keeps_strict_output_and_filters_short_segments(self):
+        _, raw = make_episode(self.root / 'raw', main=(10, 40, 70, 100, 130, 160),
+                              other={1: (10, 40, 100, 130, 160)})
+        raw['arms/left/wrench'][13, 0] = np.nan
+        data, report = self.convert(mode='strict', min_segment_frames=2)
+        np.testing.assert_allclose(data['data/timestamp'][:], [.01, .04])
+        self.assertEqual(report['episodes'][0]['short_segments'], {'segments': 2, 'frames': 2})
+        self.assertEqual(report['conversion_config']['mode'], 'strict')
+        self.assertNotIn('recording_time_ns', data['meta'])
+        self.assertIn('camera_0 real frame times', data.attrs['timestamp'])
+
+    def test_default_is_the_project_repair_config_and_pauses_split_without_review(self):
+        from bimanual_teleop.common.config import load_yaml_config
+        from bimanual_teleop.recording.policy import DEFAULT_CONFIG
+
+        self.pause_episode()
+        report = convert_recordings(self.root / 'raw', self.root / 'default.zarr', action_space='eef')
+        expected = load_yaml_config(DEFAULT_CONFIG)
+        self.assertEqual({key: report['conversion_config'][key] for key in expected}, expected)
+        self.assertEqual(report['conversion_config']['mode'], 'repair')
+        self.assertFalse(report['episodes'][0]['pauses'][0]['merged'])
+
+    def test_report_says_what_was_dropped_and_how_frames_were_repaired(self):
+        from bimanual_teleop.cli.convert_recording import summary_lines
+
+        times = np.arange(9) * 1000 / 30
+        make_episode(self.root / 'raw', main=times, other={1: times[[0, 1, 3, 4, 5, 6, 7, 8]]},
+                     state=(0, 20, 40, 120, 140, 160, 180, 200, 220, 240, 260, 280))
+        _, report = self.convert()
+        item = report['episodes'][0]
+        self.assertEqual(item['state_repairs'], {'frames': 2, 'beyond_ms': 50.0, 'max_gap_ms': 80.0})
+        self.assertEqual(item['camera_repairs'][1]['reused_frames'], 1)
+        text = '\n'.join(summary_lines(report))
+        self.assertIn('缺帧沿用前一张图：camera_1 1 帧（图像最旧 33 ms）', text)
+        self.assertIn('放宽插值 2 帧（前后样本相隔超过 50 ms，最大 80 ms）', text)
+        self.assertIn('修复：缺帧沿用前一张图 camera_1 1 帧；放宽插值 2 帧；暂停在此切开 0 处', text)
 
     def test_bad_config_and_clock_reset_do_not_publish(self):
         raw = self.pause_episode()

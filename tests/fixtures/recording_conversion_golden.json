@@ -1,0 +1,584 @@
+{
+ "repair_pause": {
+  "episodes": [
+   {
+    "camera_repairs": [
+     {
+      "camera": "camera_0",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_1",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_2",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     }
+    ],
+    "invalid_reasons": {
+     "left_arm_command_invalid_or_stale": 1,
+     "left_hand_command_invalid_or_stale": 1,
+     "left_hand_joint_invalid_or_gap": 1,
+     "left_robot_eef_pose_invalid_or_gap": 1,
+     "left_robot_joint_invalid_or_gap": 1,
+     "left_wrench_invalid_or_gap": 1,
+     "right_arm_command_invalid_or_stale": 1,
+     "right_hand_command_invalid_or_stale": 1,
+     "right_hand_joint_invalid_or_gap": 1,
+     "right_robot_eef_pose_invalid_or_gap": 1,
+     "right_robot_joint_invalid_or_gap": 1,
+     "right_wrench_invalid_or_gap": 1
+    },
+    "main_camera_gaps": 0,
+    "pauses": [
+     {
+      "after_main_row": 4,
+      "block": 1,
+      "merged": true,
+      "reason": "Synthetic seam",
+      "removed_wait_ns": 2000000000,
+      "training_shift_ns": -33333333
+     }
+    ],
+    "reference_frames": 9,
+    "segments": 1,
+    "source_episode": "episode_000000",
+    "status": "complete",
+    "valid_frames": 8
+   },
+   {
+    "camera_repairs": [
+     {
+      "camera": "camera_0",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_1",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_2",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     }
+    ],
+    "invalid_reasons": {
+     "left_hand_joint_invalid_or_gap": 3,
+     "left_robot_eef_pose_invalid_or_gap": 4,
+     "left_robot_joint_invalid_or_gap": 3,
+     "left_wrench_invalid_or_gap": 3,
+     "right_hand_joint_invalid_or_gap": 3,
+     "right_robot_eef_pose_invalid_or_gap": 3,
+     "right_robot_joint_invalid_or_gap": 3,
+     "right_wrench_invalid_or_gap": 3
+    },
+    "main_camera_gaps": 0,
+    "pauses": [],
+    "reference_frames": 7,
+    "segments": 2,
+    "source_episode": "episode_000001",
+    "status": "complete",
+    "valid_frames": 3
+   }
+  ],
+  "report": {
+   "action_space": "joint",
+   "conversion_config": {
+    "camera_match_tolerance_ms": 20,
+    "max_command_age_ms": 50,
+    "max_missing_camera_frames": 2,
+    "max_state_interp_gap_ms": 100,
+    "min_segment_frames": 0,
+    "mode": "repair",
+    "pause_offset_tolerance_ms": 100,
+    "pause_policy": "checked_compress",
+    "pause_reviews": {
+     "episode_000000": {
+      "4": {
+       "merge": true,
+       "reason": "Synthetic seam"
+      }
+     }
+    },
+    "target_fps": 30
+   },
+   "include_depth": false,
+   "output_episodes": 2,
+   "output_frames": 11,
+   "output_segments": 3
+  },
+  "root": {
+   "action_layout": "left_arm,right_arm,left_hand,right_hand",
+   "action_space": "joint",
+   "conversion_config": {
+    "camera_match_tolerance_ms": 20,
+    "max_command_age_ms": 50,
+    "max_missing_camera_frames": 2,
+    "max_state_interp_gap_ms": 100,
+    "min_segment_frames": 0,
+    "mode": "repair",
+    "pause_offset_tolerance_ms": 100,
+    "pause_policy": "checked_compress",
+    "pause_reviews": {
+     "episode_000000": {
+      "4": {
+       "merge": true,
+       "reason": "Synthetic seam"
+      }
+     }
+    },
+    "target_fps": 30
+   },
+   "eef_pose_format": "xyz_m+rotvec_rad",
+   "episode_ends_semantics": "source_demonstrations",
+   "format": "diffusion_policy_replay_buffer",
+   "include_depth": false,
+   "joint_unit": "rad",
+   "sampling_boundaries": "meta/segment_ends",
+   "schema_version": 2,
+   "side_order": [
+    "left",
+    "right"
+   ],
+   "target_fps": 30,
+   "timestamp": "seconds on per-block training grids; reviewed pauses may be compressed",
+   "wrench_format": "Fx,Fy,Fz [N]; Tx,Ty,Tz [N*m]"
+  },
+  "segments": [
+   {
+    "end_ns": 1266666666,
+    "output_end": 8,
+    "output_start": 0,
+    "reference_frame_end": 9,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000000",
+    "start_ns": 1000000000
+   },
+   {
+    "end_ns": 1000000000,
+    "output_end": 9,
+    "output_start": 8,
+    "reference_frame_end": 1,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000001",
+    "start_ns": 1000000000
+   },
+   {
+    "end_ns": 1200000000,
+    "output_end": 11,
+    "output_start": 9,
+    "reference_frame_end": 7,
+    "reference_frame_start": 5,
+    "source_episode": "episode_000001",
+    "start_ns": 1166666667
+   }
+  ]
+ },
+ "repair_reuse": {
+  "episodes": [
+   {
+    "camera_repairs": [
+     {
+      "camera": "camera_0",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_1",
+      "max_image_age_ms": 66.666667,
+      "reused_frames": 3,
+      "reused_ratio": 0.3333333333333333
+     },
+     {
+      "camera": "camera_2",
+      "max_image_age_ms": 66.666667,
+      "reused_frames": 3,
+      "reused_ratio": 0.3333333333333333
+     }
+    ],
+    "invalid_reasons": {},
+    "main_camera_gaps": 0,
+    "pauses": [],
+    "reference_frames": 9,
+    "segments": 1,
+    "source_episode": "episode_000000",
+    "status": "complete",
+    "valid_frames": 9
+   },
+   {
+    "camera_repairs": [
+     {
+      "camera": "camera_0",
+      "max_image_age_ms": 33.333334,
+      "reused_frames": 1,
+      "reused_ratio": 0.14285714285714285
+     },
+     {
+      "camera": "camera_1",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_2",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     }
+    ],
+    "invalid_reasons": {
+     "camera_1_unmatched": 1
+    },
+    "main_camera_gaps": 1,
+    "pauses": [],
+    "reference_frames": 8,
+    "segments": 1,
+    "source_episode": "episode_000001",
+    "status": "complete",
+    "valid_frames": 7
+   },
+   {
+    "camera_repairs": [
+     {
+      "camera": "camera_0",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_1",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     },
+     {
+      "camera": "camera_2",
+      "max_image_age_ms": 0.0,
+      "reused_frames": 0,
+      "reused_ratio": 0.0
+     }
+    ],
+    "invalid_reasons": {
+     "camera_1_unmatched": 3
+    },
+    "main_camera_gaps": 0,
+    "pauses": [],
+    "reference_frames": 9,
+    "segments": 2,
+    "source_episode": "episode_000002",
+    "status": "complete",
+    "valid_frames": 6
+   }
+  ],
+  "report": {
+   "action_space": "eef",
+   "conversion_config": {
+    "camera_match_tolerance_ms": 20,
+    "max_command_age_ms": 50,
+    "max_missing_camera_frames": 2,
+    "max_state_interp_gap_ms": 100,
+    "min_segment_frames": 0,
+    "mode": "repair",
+    "pause_offset_tolerance_ms": 100,
+    "pause_policy": "checked_compress",
+    "pause_reviews": {},
+    "target_fps": 30
+   },
+   "include_depth": false,
+   "output_episodes": 3,
+   "output_frames": 22,
+   "output_segments": 4
+  },
+  "root": {
+   "action_layout": "left_arm,right_arm,left_hand,right_hand",
+   "action_space": "eef",
+   "conversion_config": {
+    "camera_match_tolerance_ms": 20,
+    "max_command_age_ms": 50,
+    "max_missing_camera_frames": 2,
+    "max_state_interp_gap_ms": 100,
+    "min_segment_frames": 0,
+    "mode": "repair",
+    "pause_offset_tolerance_ms": 100,
+    "pause_policy": "checked_compress",
+    "pause_reviews": {},
+    "target_fps": 30
+   },
+   "eef_pose_format": "xyz_m+rotvec_rad",
+   "episode_ends_semantics": "source_demonstrations",
+   "format": "diffusion_policy_replay_buffer",
+   "include_depth": false,
+   "joint_unit": "rad",
+   "sampling_boundaries": "meta/segment_ends",
+   "schema_version": 2,
+   "side_order": [
+    "left",
+    "right"
+   ],
+   "target_fps": 30,
+   "timestamp": "seconds on per-block training grids; reviewed pauses may be compressed",
+   "wrench_format": "Fx,Fy,Fz [N]; Tx,Ty,Tz [N*m]"
+  },
+  "segments": [
+   {
+    "end_ns": 1266666667,
+    "output_end": 9,
+    "output_start": 0,
+    "reference_frame_end": 9,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000000",
+    "start_ns": 1000000000
+   },
+   {
+    "end_ns": 1233333333,
+    "output_end": 16,
+    "output_start": 9,
+    "reference_frame_end": 7,
+    "reference_frame_start": 1,
+    "source_episode": "episode_000001",
+    "start_ns": 1033333333
+   },
+   {
+    "end_ns": 1033333333,
+    "output_end": 18,
+    "output_start": 16,
+    "reference_frame_end": 2,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000002",
+    "start_ns": 1000000000
+   },
+   {
+    "end_ns": 1266666667,
+    "output_end": 22,
+    "output_start": 18,
+    "reference_frame_end": 9,
+    "reference_frame_start": 5,
+    "source_episode": "episode_000002",
+    "start_ns": 1166666667
+   }
+  ]
+ },
+ "strict_eef_depth": {
+  "episodes": [
+   {
+    "invalid_reasons": {
+     "camera_1_unmatched": 1,
+     "left_wrench_invalid_or_gap": 1
+    },
+    "main_camera_gaps": 0,
+    "reference_frames": 6,
+    "segments": 3,
+    "source_episode": "episode_000000",
+    "status": "complete",
+    "valid_frames": 4
+   },
+   {
+    "invalid_reasons": {},
+    "main_camera_gaps": 1,
+    "reference_frames": 4,
+    "segments": 2,
+    "source_episode": "episode_000001",
+    "status": "complete",
+    "valid_frames": 4
+   },
+   {
+    "source_episode": "episode_000002",
+    "status": "failed"
+   }
+  ],
+  "report": {
+   "action_space": "eef",
+   "conversion_config": {
+    "min_segment_frames": 0,
+    "mode": "strict",
+    "pause_offset_tolerance_ms": 100
+   },
+   "include_depth": true,
+   "output_episodes": 2,
+   "output_frames": 8,
+   "output_segments": 5
+  },
+  "root": {
+   "action_layout": "left_arm,right_arm,left_hand,right_hand",
+   "action_space": "eef",
+   "eef_pose_format": "xyz_m+rotvec_rad",
+   "episode_ends_semantics": "source_demonstrations",
+   "format": "diffusion_policy_replay_buffer",
+   "include_depth": true,
+   "joint_unit": "rad",
+   "sampling_boundaries": "meta/segment_ends",
+   "schema_version": 2,
+   "side_order": [
+    "left",
+    "right"
+   ],
+   "timestamp": "seconds since source episode start; camera_0 real frame times",
+   "wrench_format": "Fx,Fy,Fz [N]; Tx,Ty,Tz [N*m]"
+  },
+  "segments": [
+   {
+    "end_ns": 1040000000,
+    "output_end": 2,
+    "output_start": 0,
+    "reference_frame_end": 2,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000000",
+    "start_ns": 1010000000
+   },
+   {
+    "end_ns": 1100000000,
+    "output_end": 3,
+    "output_start": 2,
+    "reference_frame_end": 4,
+    "reference_frame_start": 3,
+    "source_episode": "episode_000000",
+    "start_ns": 1100000000
+   },
+   {
+    "end_ns": 1160000000,
+    "output_end": 4,
+    "output_start": 3,
+    "reference_frame_end": 6,
+    "reference_frame_start": 5,
+    "source_episode": "episode_000000",
+    "start_ns": 1160000000
+   },
+   {
+    "end_ns": 1040000000,
+    "output_end": 6,
+    "output_start": 4,
+    "reference_frame_end": 2,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000001",
+    "start_ns": 1010000000
+   },
+   {
+    "end_ns": 1150000000,
+    "output_end": 8,
+    "output_start": 6,
+    "reference_frame_end": 4,
+    "reference_frame_start": 2,
+    "source_episode": "episode_000001",
+    "start_ns": 1120000000
+   }
+  ]
+ },
+ "strict_joint": {
+  "episodes": [
+   {
+    "invalid_reasons": {
+     "camera_1_unmatched": 1,
+     "left_wrench_invalid_or_gap": 1
+    },
+    "main_camera_gaps": 0,
+    "reference_frames": 6,
+    "segments": 3,
+    "source_episode": "episode_000000",
+    "status": "complete",
+    "valid_frames": 4
+   },
+   {
+    "invalid_reasons": {},
+    "main_camera_gaps": 1,
+    "reference_frames": 4,
+    "segments": 2,
+    "source_episode": "episode_000001",
+    "status": "complete",
+    "valid_frames": 4
+   },
+   {
+    "source_episode": "episode_000002",
+    "status": "failed"
+   }
+  ],
+  "report": {
+   "action_space": "joint",
+   "conversion_config": {
+    "min_segment_frames": 0,
+    "mode": "strict",
+    "pause_offset_tolerance_ms": 100
+   },
+   "include_depth": false,
+   "output_episodes": 2,
+   "output_frames": 8,
+   "output_segments": 5
+  },
+  "root": {
+   "action_layout": "left_arm,right_arm,left_hand,right_hand",
+   "action_space": "joint",
+   "eef_pose_format": "xyz_m+rotvec_rad",
+   "episode_ends_semantics": "source_demonstrations",
+   "format": "diffusion_policy_replay_buffer",
+   "include_depth": false,
+   "joint_unit": "rad",
+   "sampling_boundaries": "meta/segment_ends",
+   "schema_version": 2,
+   "side_order": [
+    "left",
+    "right"
+   ],
+   "timestamp": "seconds since source episode start; camera_0 real frame times",
+   "wrench_format": "Fx,Fy,Fz [N]; Tx,Ty,Tz [N*m]"
+  },
+  "segments": [
+   {
+    "end_ns": 1040000000,
+    "output_end": 2,
+    "output_start": 0,
+    "reference_frame_end": 2,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000000",
+    "start_ns": 1010000000
+   },
+   {
+    "end_ns": 1100000000,
+    "output_end": 3,
+    "output_start": 2,
+    "reference_frame_end": 4,
+    "reference_frame_start": 3,
+    "source_episode": "episode_000000",
+    "start_ns": 1100000000
+   },
+   {
+    "end_ns": 1160000000,
+    "output_end": 4,
+    "output_start": 3,
+    "reference_frame_end": 6,
+    "reference_frame_start": 5,
+    "source_episode": "episode_000000",
+    "start_ns": 1160000000
+   },
+   {
+    "end_ns": 1040000000,
+    "output_end": 6,
+    "output_start": 4,
+    "reference_frame_end": 2,
+    "reference_frame_start": 0,
+    "source_episode": "episode_000001",
+    "start_ns": 1010000000
+   },
+   {
+    "end_ns": 1150000000,
+    "output_end": 8,
+    "output_start": 6,
+    "reference_frame_end": 4,
+    "reference_frame_start": 2,
+    "source_episode": "episode_000001",
+    "start_ns": 1120000000
+   }
+  ]
+ }
+}

@@ -1,0 +1,43 @@
+# 导出（含 --dry-run）时每条完整条目的质量阈值；convert_recording.py --quality-config 可换用其他文件。
+# 每项写成 {warn, fail}：上限类指标达到 warn 记 WARN、达到 fail 记 FAIL；
+# 下限类（min_duration_s、min_hz）低于 warn 记 WARN、低于 fail 记 FAIL。
+# 等级只标注报告，不改变写入哪些帧；要排除某条，在审片中剔除。
+# 暂停识别阈值和跨相机匹配容差沿用转换模式的设置，不在这里重复配置。
+
+# 条目窗口 [start_ns, end_ns) 的时长，秒；过短通常是误按保存。
+episode:
+  min_duration_s: {warn: 5, fail: 1}
+
+# 每台相机在条目窗口内的 RGB 帧；暂停接缝两侧不计丢帧和断档。
+camera:
+  # 相邻两帧间隔超过几个帧周期（30 fps）记一次断档；1.5 即 50 ms。
+  gap_periods: 1.5
+  # 帧号跳变累计缺失的帧数。
+  dropped_frames: {warn: 1, fail: 30}
+  # 断档次数；帧号连续、时间间隔却超标的情况也计入，两者要一起看。
+  gaps: {warn: 1, fail: 30}
+  # 最大帧间隔，ms；单帧丢失约 67 ms。
+  max_gap_ms: {warn: 70, fail: 500}
+
+# camera_1、camera_2 相对 camera_0 真实帧的最近帧时间差，与转换模式无关。
+cross_camera:
+  # 已对应帧的时间差 99 分位，ms；两台未硬件同步的 30 fps 相机最大相位差约半个周期 16.7 ms，
+  # 超过它说明帧间隔不规则或时间映射有问题。对不上的帧见报告中的剔除原因。
+  p99_offset_ms: {warn: 17, fail: 20}
+
+# 低维流：频率为窗口内样本数除以条目时长，最大间隔取窗口内相邻样本。
+# 本机实测参考：手臂状态约 190～198 Hz，手部状态 140～197 Hz，臂指令约 160 Hz，手指令约 118 Hz。
+streams:
+  arms:
+    min_hz: {warn: 180, fail: 100}
+    max_gap_ms: {warn: 30, fail: 100}
+  hands:
+    min_hz: {warn: 150, fail: 60}
+    max_gap_ms: {warn: 30, fail: 100}
+  # 转换要求最近一次成功提交的指令不超过 50 ms，所以指令间隔的 warn 取 50 ms。
+  arm_commands:
+    min_hz: {warn: 100, fail: 30}
+    max_gap_ms: {warn: 50, fail: 200}
+  hand_commands:
+    min_hz: {warn: 100, fail: 30}
+    max_gap_ms: {warn: 50, fail: 200}

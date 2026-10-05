@@ -1,4 +1,4 @@
-"""Offline conversion tests with actual encoded video and asynchronous streams."""
+"""Strict-mode conversion tests with actual encoded video and asynchronous streams."""
 
 import importlib.util
 import json
@@ -10,105 +10,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from bimanual_teleop.recording.convert import convert_recordings
+from tests.support.recording import CountingProgress, START_NS, make_episode, write_video
 
-
-START_NS = 1_000_000_000
-
-
-class CountingProgress:
-    """Records what a converter reports to the terminal progress bars."""
-
-    def __init__(self):
-        self.episodes, self.names, self.totals, self.advanced, self.finished = None, [], [], [], 0
-
-    def start(self, episodes):
-        self.episodes = episodes
-
-    def episode(self, name, total=None):
-        self.names.append(name)
-        self.advanced.append(0)
-
-    def total(self, total):
-        self.totals.append(total)
-
-    def advance(self, count=1):
-        self.advanced[-1] += count
-
-    def finish_episode(self):
-        self.finished += 1
-
-
-def write_video(path, count, camera=0):
-    import av
-
-    with av.open(str(path), "w") as container:
-        stream = container.add_stream("libx264rgb", rate=30)
-        stream.width = stream.height = 16
-        stream.pix_fmt = "rgb24"
-        stream.options = {"crf": "0", "preset": "ultrafast"}
-        for index in range(count):
-            pixels = np.zeros((16, 16, 3), np.uint8)
-            pixels[..., 0] = 20 + index * 20
-            pixels[..., 1] = camera * 50
-            frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
-            for packet in stream.encode(frame):
-                container.mux(packet)
-        for packet in stream.encode():
-            container.mux(packet)
-
-
-def make_episode(parent, name="episode_000000", *, main=(10., 43., 77., 110.),
-                 state=None, commands=None, other=None, depth=False):
-    import zarr
-
-    path = parent / name
-    path.mkdir(parents=True)
-    stop = max(main) + 41
-    state = np.arange(0, stop, 10.) if state is None else np.asarray(state)
-    commands = np.arange(0, stop, 20.) if commands is None else np.asarray(commands)
-    metadata = {"model": "test-model", "joint_unit": "rad"}
-    descriptor = {"schema_version": 1, "status": "complete", "start_ns": START_NS,
-                  "end_ns": START_NS + round(stop * 1e6), "metadata": metadata}
-    (path / "episode.json").write_text(json.dumps(descriptor))
-    raw = zarr.open_group(str(path / "raw.zarr"), mode="w")
-    raw.attrs["metadata"] = metadata
-
-    def group(name, times):
-        result = raw.create_group(name)
-        times = np.asarray(times, dtype=float)
-        result.array("time_ns", START_NS + np.rint(times * 1e6).astype(np.int64))
-        result.array("sequence", np.arange(len(times), dtype=np.int64))
-        return result
-
-    for side, base in (("left", 0.), ("right", 100.)):
-        arm = group(f"arms/{side}", state)
-        arm.array("joint_pos", base + np.arange(7) + state[:, None] / 1000.)
-        poses = np.zeros((len(state), 7))
-        poses[:, 0] = base + state / 1000.
-        poses[:, 3:] = Rotation.from_euler("z", state / 1000.).as_quat()
-        arm.array("eef_pose", poses)
-        arm.array("wrench", base + np.arange(6) + state[:, None] / 1000.)
-        hand = group(f"hands/{side}", state)
-        hand.array("joint_pos", base + np.arange(20) + state[:, None] / 1000.)
-        command = group(f"arm_commands/{side}", commands)
-        command.array("joint_pos", base + 10 + np.arange(7) + commands[:, None] / 1000.)
-        goals = np.zeros((len(commands), 7))
-        goals[:, 0] = base + 5 + commands / 1000.
-        goals[:, 6] = 1.
-        command.array("eef_pose", goals)
-        hand_command = group(f"hand_commands/{side}", commands)
-        hand_command.array("joint_pos", base + 20 + np.arange(20) + commands[:, None] / 1000.)
-    for camera in range(3):
-        times = main if not other or camera not in other else other[camera]
-        rgb = group(f"cameras/camera_{camera}/rgb", times)
-        rgb.array("source_time_ms", np.asarray(times, float))
-        write_video(path / f"camera_{camera}.mp4", len(times), camera)
-    if depth:
-        times = np.asarray(main) + 2
-        frames = group("cameras/camera_0/depth", times)
-        frames.array("source_time_ms", times)
-        frames.array("image", np.stack([np.full((4, 4), i + 100, np.uint16) for i in range(len(times))]))
-    return path, raw
+STRICT = {"mode": "strict"}
 
 
 @unittest.skipUnless(importlib.util.find_spec("av") and importlib.util.find_spec("zarr"),
@@ -124,6 +28,7 @@ class RecordingConversionTests(unittest.TestCase):
     def convert(self, action_space="eef", **kwargs):
         import zarr
 
+        kwargs.setdefault("conversion_config", STRICT)
         report = convert_recordings(self.input, self.output, action_space=action_space, **kwargs)
         return zarr.open_group(str(self.output), mode="r"), report
 
@@ -214,7 +119,8 @@ class RecordingConversionTests(unittest.TestCase):
         np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [4])
         np.testing.assert_array_equal(dataset["meta/segment_ends"][:], [4])
         with_depth = self.root / "with_depth.zarr"
-        report = convert_recordings(self.input, with_depth, action_space="eef", include_depth=True)
+        report = convert_recordings(self.input, with_depth, action_space="eef", include_depth=True,
+                                    conversion_config=STRICT)
         dataset = zarr.open_group(str(with_depth), mode="r")
         self.assertIn("camera_0_depth", dataset["data"])
         np.testing.assert_array_equal(dataset["meta/episode_ends"][:], [3])
@@ -313,7 +219,7 @@ class RecordingConversionTests(unittest.TestCase):
         from unittest.mock import ANY, patch
         import io
 
-        report = {"output_episodes": 1, "output_segments": 3, "output_frames": 4}
+        report = {"episodes": [], "output_episodes": 1, "output_segments": 3, "output_frames": 4}
         for extra, expected in (([], False), (["--include-depth"], True)):
             with self.subTest(include_depth=expected):
                 output = io.StringIO()
@@ -323,8 +229,73 @@ class RecordingConversionTests(unittest.TestCase):
                                        "--action-space", "eef"] + extra)
                 self.assertEqual(result, 0)
                 convert.assert_called_once_with(self.input, self.output, action_space="eef",
-                                                include_depth=expected, progress=ANY)
+                                                include_depth=expected, allow_mixed_metadata=False,
+                                                dry_run=False, progress=ANY)
                 self.assertIn("1 条原始演示、3 个连续片段", output.getvalue())
+
+    def test_dry_run_reports_what_conversion_writes_without_decoding_or_writing(self):
+        make_episode(self.input, main=(10, 40, 70, 100, 130, 160), other={1: (10, 40, 100, 130, 160)})
+        make_episode(self.input, name="episode_000001", main=(10, 40, 120, 150))
+        progress = CountingProgress()
+        planned = convert_recordings(self.input, None, action_space="eef", conversion_config=STRICT,
+                                     dry_run=True, progress=progress)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(progress.totals, [])
+        self.assertEqual(progress.finished, 2)
+        _, report = self.convert()
+        for key in ("output_episodes", "output_segments", "output_frames", "episodes"):
+            self.assertEqual(planned[key], report[key], key)
+        self.assertTrue(planned["dry_run"])
+
+    def test_edge_trimming_is_reported_apart_from_interior_rejections(self):
+        from bimanual_teleop.cli.convert_recording import summary_lines
+
+        make_episode(self.input, main=(0, 30, 60, 90, 120, 150), other={1: (0, 30, 60, 120, 150)},
+                     state=np.arange(5, 200, 10), commands=np.arange(0, 81, 20))
+        _, report = self.convert()
+        item = report["episodes"][0]
+        self.assertEqual(item["edge_trimmed_frames"], {"start": 1, "end": 1})
+        self.assertEqual(item["interior_invalid_frames"], 1)
+        self.assertEqual(item["interior_invalid_reasons"], {"camera_1_unmatched": 1})
+        self.assertEqual(item["invalid_reasons"]["left_robot_joint_invalid_or_gap"], 1)
+        self.assertEqual(item["invalid_reasons"]["right_arm_command_invalid_or_stale"], 1)
+        self.assertEqual(item["edge_trimmed_reasons"]["left_robot_joint_invalid_or_gap"], 1)
+        self.assertEqual(item["edge_trimmed_reasons"]["right_arm_command_invalid_or_stale"], 1)
+        self.assertNotIn("camera_1_unmatched", item["edge_trimmed_reasons"])
+        text = "\n".join(summary_lines(report))
+        self.assertIn("丢弃：首尾 1+1 帧（", text)
+        self.assertIn("；中间 1 帧（camera_1 缺帧 1）", text)
+        self.assertIn("写入 3 帧（利用率 50.0%）", text)
+
+    def test_metadata_that_defines_data_must_match_unless_mixing_is_allowed(self):
+        from tests.support.recording import TEST_METADATA
+
+        for name, serial, user in (("episode_000000", "A", "alice"), ("episode_000001", "B", "bob")):
+            make_episode(self.input, name=name, metadata={
+                **TEST_METADATA, "cameras": {"camera_1": {"serial": serial}},
+                "wuji_config": {"sdk_user_name": user, "control_hz": 120}})
+        with self.assertRaisesRegex(ValueError, r"cameras\.camera_1\.serial"):
+            self.convert()
+        self.assertFalse(self.output.exists())
+        _, report = self.convert(allow_mixed_metadata=True)
+        self.assertNotIn("metadata_differences", report["episodes"][0])
+        self.assertEqual(report["episodes"][1]["metadata_differences"], ["cameras.camera_1.serial"])
+
+    def test_cli_dry_run_defaults_to_repair_and_needs_no_output(self):
+        from bimanual_teleop.cli.convert_recording import main
+        from contextlib import redirect_stdout
+        import io
+
+        make_episode(self.input)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = main(["--input", str(self.input), "--action-space", "joint", "--dry-run"])
+        self.assertEqual(result, 0)
+        self.assertIn("修复模式", output.getvalue())
+        self.assertIn("episode_000000：参考 4 帧，写入 4 帧（100.0%）", output.getvalue())
+        self.assertIn("修复：缺帧沿用前一张图 0 帧；放宽插值 0 帧", output.getvalue())
+        self.assertIn("试运行：将导出 1 条原始演示", output.getvalue())
+        self.assertFalse(any(self.root.glob("*.zarr")))
 
 
 if __name__ == "__main__":

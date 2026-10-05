@@ -11,6 +11,8 @@ import threading
 import time
 from uuid import uuid4
 
+from .episodes import CAPTURED, COMPLETE, DISCARDED, FAILED
+from .schema import DEPTH_STREAM, RGB_STREAMS
 from .sink import CaptureChannel, RecorderSink, STATE_STREAMS, COMMAND_STREAMS
 
 
@@ -49,9 +51,9 @@ def _worker(config, sdk_root, metadata, channel, connection, viewer, nice_increm
     ending = None
     latest_images = {}
     camera_seen = {}
-    required_cameras = [f"cameras/camera_{i}/rgb" for i in range(3)]
+    required_cameras = list(RGB_STREAMS)
     if config.main_depth:
-        required_cameras.append("cameras/camera_0/depth")
+        required_cameras.append(DEPTH_STREAM)
     try:
         kinematics = TianjiKinematics(sdk_root)
         if viewer:
@@ -199,11 +201,11 @@ def _worker(config, sdk_root, metadata, channel, connection, viewer, nice_increm
                 end_ns, status, reason, _ = ending
                 missing = set(STATE_STREAMS + COMMAND_STREAMS + tuple(required_cameras)) - set(writer.counts)
                 if not drained or not past_end or missing:
-                    status = "failed"
+                    status = FAILED
                     reason = f"录制数据未完整收尾；缺少流：{sorted(missing)}"
                     channel.fail(reason)
                 if channel.failed.is_set():
-                    status, reason = "failed", reason or "采集通道失败"
+                    status, reason = FAILED, reason or "采集通道失败"
                 path = str(writer.path)
                 # Final encoder and array flushes are allowed to block without
                 # accumulating frames for the next, not-yet-started episode.
@@ -228,7 +230,7 @@ def _worker(config, sdk_root, metadata, channel, connection, viewer, nice_increm
         rig.close()
         if writer is not None:
             try:
-                writer.close(time.monotonic_ns(), "failed", failure)
+                writer.close(time.monotonic_ns(), FAILED, failure)
             except Exception:
                 pass  # Disk failure leaves the manifest incomplete, never complete.
         if preview is not None:
@@ -381,7 +383,7 @@ class Recorder:
             return
         self.state = "resuming"
 
-    def end(self, *, status="complete", reason=None):
+    def end(self, *, status=COMPLETE, reason=None):
         if not self.episode_open:
             return
         self.channel.active.value = False
@@ -415,8 +417,8 @@ class Recorder:
                     elif kind == "saved":
                         self.state = "idle"
                         path, status = value
-                        label = {"captured": "已采集，等待离线整理",
-                                 "complete": "已保存", "discarded": "已作废"}.get(status, "不完整")
+                        label = {CAPTURED: "已采集，等待离线整理",
+                                 COMPLETE: "已保存", DISCARDED: "已作废"}.get(status, "不完整")
                         self.notices.append(f"录制{label}：{path}")
             except (EOFError, OSError):
                 pass
@@ -462,7 +464,7 @@ class Recorder:
         self.process = self.connection = None
 
     def close(self):
-        self.end(status="failed", reason="退出时录制尚未结束")
+        self.end(status=FAILED, reason="退出时录制尚未结束")
         # Encoder and depth workers close concurrently, but MP4 trailer and
         # fsync completion can legitimately exceed the old three-second limit.
         deadline = time.monotonic() + 20.
