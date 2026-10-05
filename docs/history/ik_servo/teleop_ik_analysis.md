@@ -98,7 +98,7 @@ PICO 此时输出约 `(39.8199, −70.5485, −65.3472, −52, 58.9653, 3.1242, 
 
 ```bash
 conda activate bimanual-teleop
-python scripts/analyze_tianji_ik.py docs/teleop_ik_reproduction.json
+python scripts/analyze_tianji_ik.py docs/history/ik_servo/teleop_ik_reproduction.json
 python scripts/analyze_tianji_ik.py failure.txt --scan-nsp
 ```
 

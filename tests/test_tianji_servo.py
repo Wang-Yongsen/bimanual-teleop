@@ -44,7 +44,7 @@ class TianjiServoTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.kine = TianjiKinematics()
-        evidence = json.loads((ROOT / "docs/teleop_ik_20260915_1511_evidence.json").read_text())
+        evidence = json.loads((ROOT / "docs/history/ik_servo/teleop_ik_20260915_1511_evidence.json").read_text())
         cls.records = [record["input"] for record in evidence["records"]]
         if len(cls.records) != 7:
             raise AssertionError("Expected all seven independently recorded IK failures")

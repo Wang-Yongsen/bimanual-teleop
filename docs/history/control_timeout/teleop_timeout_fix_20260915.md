@@ -12,7 +12,7 @@ CPython 3.10 的 Python 线程共享 GIL，`ctypes.CDLL` 调用释放后需要�
 
 ### 1. 完整隔离手部工作
 
-联合模式的 [CLI](../bimanual_teleop/cli/teleop_quest_tianji.py) 创建 [WujiProcess](../bimanual_teleop/control/hand/process.py)。子进程使用 `spawn`，自行创建 SDK manager、四个设备、接收线程、重定向器及 120 Hz 手部控制线程。主进程负责 Quest 和机械臂。
+联合模式的 [CLI](../../../bimanual_teleop/cli/teleop_quest_tianji.py) 创建 [WujiProcess](../../../bimanual_teleop/control/hand/process.py)。子进程使用 `spawn`，自行创建 SDK manager、四个设备、接收线程、重定向器及 120 Hz 手部控制线程。主进程负责 Quest 和机械臂。
 
 进程间只发送生命周期请求和 50 Hz 观察快照，包含手势所需的原始骨架样本及健康状态；手部关节命令不经过主进程，1 kHz 反馈不逐帧跨进程转发。快照保留原始序号、epoch 和接收时间。骨架、关节、诊断和工作线程各自的过期时间仍有效，收到新快照不延长旧数据的寿命。
 
@@ -52,7 +52,7 @@ CPython 3.10 的 Python 线程共享 GIL，`ctypes.CDLL` 调用释放后需要�
 
 原始组启动期间记录过一次机械臂反馈队列溢出，发生在手部设备创建/连接阶段，结束时反馈健康。探针先连接机械臂再连接手部，生产联合入口的顺序相反；不能把这个启动溢出当作生产稳态超时证据。表中的长周期发生在准备完成后的测量区间。
 
-原始汇总、最慢周期及样本统计见[实测数据](teleop_timeout_fix_evidence_20260915.json)。该次采集使用现已退役的 `all-process 180` 实验入口。当前命令期限和进程生命周期检查见 [watchdog 回归](../tests/test_tianji_watchdog_regression.py)及 [Wuji 进程测试](../tests/test_wuji_process.py)。
+原始汇总、最慢周期及样本统计见[实测数据](teleop_timeout_fix_evidence_20260915.json)。该次采集使用现已退役的 `all-process 180` 实验入口。当前命令期限和进程生命周期检查见 [watchdog 回归](../../../tests/test_tianji_watchdog_regression.py)及 [Wuji 进程测试](../../../tests/test_wuji_process.py)。
 
 修复前源码取自本轮修改前保存在 `/tmp/teleop-timeout-baseline-20260915` 的工作区副本，包含此前尚未提交的修复；不是用 Git HEAD 替代该状态。各组顺序运行，没有与本任务的测试或其他压力基准同时执行。
 

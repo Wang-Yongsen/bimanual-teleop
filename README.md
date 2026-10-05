@@ -1,158 +1,173 @@
 # 双臂机器人遥操作
 
-Quest 手柄控制天机机械臂，Wuji Glove 控制 Hand2。
+Quest 手柄控制天机机械臂，Wuji Glove 控制 Hand2，可同步采集相机与机器人数据用于 Diffusion Policy 训练。
 
-模块指南：[Quest 客户端](quest_app/README.md) · [官方天机 SDK](bimanual_teleop/vendor/tianji/README.md)。协议和接口见[开发参考](docs/development.md)。
+## 快速开始
 
-## 安装
+首次使用按以下步骤进行，各步细节见后文。
 
-在项目根目录执行，Python 统一使用 Conda 环境 `bimanual-teleop`：
+### 1. 安装
+
+运行主机为 Linux x86_64，需要 Conda 和 ADB。在项目根目录执行：
 
 ```bash
 PIP_USER=false conda env create -f environment.yml
 conda activate bimanual-teleop
 ```
 
-已有环境使用 `conda env update -n bimanual-teleop -f environment.yml`，随后重新激活环境。环境禁用用户级 Python 包，避免版本冲突。
-
-运行主机支持 Linux x86_64，需要 ADB。天机官方 Python SDK 和预编译库已随项目提供，无需编译。Quest 开启开发者模式，连接 USB，并在头显中授权调试：
+Quest 开启开发者模式、连接 USB 并在头显中授权调试后安装客户端：
 
 ```bash
-adb devices -l
 adb install -r quest_app/artifacts/quest-capture-debug.apk
 ```
 
-迁移时复制完整项目并创建上述 Conda 环境即可；天机 SDK 不需要额外下载。只有自行构建 Quest APK 才需要其构建工具，见 [Quest 指南](quest_app/README.md#构建)。
+### 2. 配置
 
-## 配置
+- [天机配置](configs/tianji_teleop.yaml)：控制器地址 `controller_ip`。
+- [Wuji 配置](configs/wuji_teleop.yaml)：左右设备地址 `devices`、已标定用户名 `sdk_user_name`；尚未标定先做[手套标定](#手套标定)。
+- [采集配置](configs/recording.yaml)：三台相机序列号，只在采集时需要。
 
-| 文件 | 需要设置的内容 |
+### 3. 检查设备
+
+各命令分别运行，确认数据正常后关闭：
+
+```bash
+python scripts/view_quest.py                   # 头显与手柄位姿
+python scripts/view_wuji_glove.py --side left  # 手套，右手用 --side right
+python scripts/home_tianji.py --inspect        # 天机当前位姿，不运动
+```
+
+### 4. 遥操作
+
+```bash
+python scripts/teleop_quest_tianji.py
+```
+
+1. 确认机器人周围无人、实体急停已释放且随手可按，按回车；机械臂先清错并回初始位姿。
+2. 拿起手柄、戴上头显，按 **Enter** 接合，双臂和双手开始跟随。**左手柄控制右臂，右手柄控制左臂。**
+3. **Space** 暂停，再按 Enter 以当前位姿为基准继续；**H** 停止跟随并回 `ready_pose`；**Q** 退出。
+
+### 5. 采集数据
+
+```bash
+python scripts/teleop_quest_tianji.py --record --viewer
+```
+
+接合后自动开始录制一条；脱离只暂停，再接合续录同一条。**S** 保存、**X** 作废、**Q** 保存并退出。换任务或回位前先按 S。
+
+### 6. 整理并导出
+
+```bash
+python scripts/finalize_recording.py --input recordings/<session>
+python scripts/convert_recording.py --input recordings/<session> \
+  --output datasets/episodes_eef.zarr --action-space eef
+```
+
+整理时会删除作废的条目。导出默认用修复模式，不需要人工：短缺帧沿用前一张图像，无法修复的帧剔除，暂停处自动切开，并逐条打印丢弃和修复了什么。导出前可选 `--dry-run` 试运行（不写文件）和 `review_recording.py` 审片（剔除条目、合并暂停接缝）。全部步骤一览见[数据采集操作的流程总览](docs/recording_guide.md#流程总览)，训练读取见其中的[训练接入](docs/recording_guide.md#7-训练接入)。
+
+## 文档
+
+| 文档 | 内容 |
 | --- | --- |
-| [天机配置](configs/tianji_teleop.yaml) | `controller_ip`、运动参数 `profile`、回位目标 `ready_pose`、参考系 `quest.coordinate_frame` |
-| [Wuji 配置](configs/wuji_teleop.yaml) | 左右设备地址 `devices`、已标定用户名 `sdk_user_name`、Hand2 反馈频率 `feedback_hz`；空用户名使用 SDK 默认用户 |
-| [采集配置](configs/recording.yaml) | 相机序列号、按主机内存设置的 `frame_capacity`、接合后等待 `start_delay_s`、录制按键 |
+| [数据采集操作](docs/recording_guide.md) | 流程总览、采集前检查、按键、整理、可选的试运行与审片、导出、训练接入、故障恢复 |
+| [数据采集参考](docs/recording_reference.md) | 采集架构、数据格式、时间语义、审片文件、转换模式、丢弃与修复、质量等级、实机验收 |
+| [开发参考](docs/development.md) | 模块、数据约定、控制时序、设备接口、测试与实机验收 |
+| [Quest 客户端](quest_app/README.md) | 连接、追踪、APK 构建 |
+| [官方天机 SDK](bimanual_teleop/vendor/tianji/README.md) | 随包 SDK 来源与更新 |
+| [历史记录](docs/history/README.md) | 故障分析、迁移验证和设计计划，仅供追溯 |
 
-参数单位和数组顺序见 YAML 注释，修改后重启程序。联合遥操作读取两份配置，可用 `--tianji-config PATH`、`--wuji-config PATH` 指定其他文件。手套查看和遥操作支持 `--user-name NAME` 临时选择已有用户。采集另用 `--recording-config PATH`。
+## 安装与配置
 
-换到核数或内存不同的电脑时，CPU 核数不用配置：录制进程不绑定特定核心。需要改的是 [采集配置](configs/recording.yaml) 里的 `frame_capacity`。三路彩色加主视角深度时，每一帧约 3.22 MiB，一条开始后会按这个长度一直占用内存。默认 256 帧约 825 MiB，适合 16 GiB 且没有交换分区的主机。约 8 GiB 改为 128；约 16 GiB 保持 256；32 GiB 及以上先保持 256，只有运行日志出现「正式帧池已满」且仍有空闲内存时再加大。允许 16 到 2048，改完重新启动采集程序。具体档位写在该文件的注释里。
+已有环境用 `conda env update -n bimanual-teleop -f environment.yml` 更新后重新激活。天机官方 SDK 随项目提供，迁移时复制整个项目并创建环境即可，无需下载或编译。
+
+| 文件 | 内容 |
+| --- | --- |
+| [天机配置](configs/tianji_teleop.yaml) | `controller_ip`、运动参数 `profile`、回位目标 `ready_pose`、参考系 `quest.coordinate_frame`、按键 `controls` |
+| [Wuji 配置](configs/wuji_teleop.yaml) | 左右设备地址 `devices`、已标定用户名 `sdk_user_name`（空则用 SDK 默认用户）、Hand2 反馈频率 `feedback_hz` |
+| [采集配置](configs/recording.yaml) | 相机序列号、帧缓冲 `frame_capacity`、开录延迟 `start_delay_s`、录制按键 |
+
+单位和数组顺序见 YAML 注释，修改后重启程序。换主机时，采集只需按内存调整 `frame_capacity`（默认 256 帧约 825 MiB）。
+
+常用参数（完整列表见各入口 `--help`）：
+
+| 参数 | 适用入口 | 作用 |
+| --- | --- | --- |
+| `--side left\|right\|both` | 大多数入口 | 选择机器人侧；点动、手套查看和标定只能选 `left` 或 `right`，这三个入口和 Hand2 回零必须指定 |
+| `--tianji-config`、`--wuji-config`、`--recording-config PATH` | 对应入口 | 改用其他配置文件 |
+| `--robot-ip`（遥操作）、`--ip`（点动、回位、清错） | 天机入口 | 临时覆盖控制器 IP |
+| `--sdk-root PATH` | 天机入口 | 改用外置的同版本官方 SDK |
+| `--user-name NAME` | 手套查看、手部遥操作、联合遥操作 | 临时选用已标定的 Wuji 用户 |
+| `--serial SERIAL` | Quest 查看、联合遥操作 | 多台 ADB 设备时选择头显 |
+| `--viewer` | 两个遥操作入口 | 另开窗口显示全部 RealSense 彩色画面；与 `--record` 同用时只显示三台采集相机（约 5 Hz）。无相机时提示后继续，关闭窗口不影响遥操作 |
+| `-v` / `--verbose` | 遥操作、天机回位 | 显示调试日志、跟随受限提示和完整故障诊断；`NO_COLOR=1` 关闭颜色 |
+| `--log-file PATH` | 联合遥操作 | 指定运行日志路径（文件须不存在） |
 
 ## 查看设备
 
-```bash
-python scripts/view_quest.py
-python scripts/view_wuji_glove.py --side left
-python scripts/home_tianji.py --inspect
-python scripts/read_tianji_force.py
-```
+除快速开始中的三个查看命令外，`python scripts/read_tianji_force.py` 读取腕部六维力（默认双臂）。同一设备同时只能被一个入口占用。
 
-查看命令分别运行，同一设备一次只运行一个入口。手套右侧使用 `--side right`；关闭窗口退出。压力颜色表示相对值，不是牛顿；`CONTACT UNKNOWN` 表示缺少有效接触信息，仍可显示压力。触觉来自手套，Hand2 Beta2 不提供触觉反馈。
-
-腕部六维力默认同时读取双臂，可加 `--side left` 或 `--side right` 只读单侧（`--side both` 为双侧）。每侧约每 0.2 秒输出一次，行首标明 `left`／`right`，`F[N]` 为 Fx、Fy、Fz，`T[N·m]` 为 Tx、Ty、Tz，`raw` 为原始值；Ctrl+C 退出。任一所选侧连续 3 秒没有新帧或反馈通道不匹配时，报错并退出。原命令 `python scripts/read_tianji_right_force.py` 保留，默认只读右臂，也支持 `--side`。
-
-所有天机入口默认使用随包官方 SDK；可用 `--sdk-root PATH` 指定配套的同版本官方目录。旧 `--library` 已移除。
+- 手套窗口：压力颜色是相对值，不是牛顿；`CONTACT UNKNOWN` 表示缺少有效接触信息。触觉来自手套，Hand2 Beta2 不提供触觉。
+- 六维力：每侧约 0.2 s 输出一行，`F[N]` 为 Fx/Fy/Fz，`T[N·m]` 为 Tx/Ty/Tz，`raw` 为原始值；所选侧 3 s 无新帧或通道不匹配时报错退出。旧入口 `read_tianji_right_force.py` 仍可用，默认只读右臂。
 
 ## 遥操作与回位
 
+除快速开始中的联合遥操作外，还有以下入口：
+
 ```bash
-# 双臂双手联合遥操作
-python scripts/teleop_quest_tianji.py
-
-# 只控制机械臂；单臂再加 --side left 或 --side right
-python scripts/teleop_quest_tianji.py --arms-only
-
-# 手套控制 Hand2：left、right 或 both
-python scripts/teleop_wuji_hand2.py --side both
-
-# 键盘点动左臂
-python scripts/jog_tianji.py --side left
-
-# 天机回配置中的 ready_pose；可加 --side 选择单臂
-python scripts/home_tianji.py
-
-# 只清错，不使能或运动；可加 --side
-python scripts/clear_tianji_errors.py
-
-# Hand2 依次回零，每侧默认 3 秒
-python scripts/home_wuji_hand2.py --side both
+python scripts/teleop_quest_tianji.py --arms-only  # 只控制机械臂
+python scripts/teleop_wuji_hand2.py --side both    # 只用手套控制 Hand2
+python scripts/jog_tianji.py --side left           # 键盘点动
+python scripts/home_tianji.py                      # 天机回 ready_pose
+python scripts/clear_tianji_errors.py              # 只清错，不使能、不运动
+python scripts/home_wuji_hand2.py --side both      # Hand2 回零，每侧默认 3 s
 ```
 
-运动命令需要交互终端。检查运动范围、释放实体急停并做好急停准备，按回车确认。天机遥操作和点动先清错、回初始位姿，再等待接合；手部遥操作连接就绪后等待接合；独立回位命令确认后直接回位。
+所有运动命令都要在交互终端按回车确认。天机遥操作和点动确认后先清错、回初始位姿，再等待接合；独立回位命令确认后同样先清错，回位后退出。
 
 | 操作 | 按键或手势 |
 | --- | --- |
-| 手部遥操作开始／恢复 | Enter |
-| 天机遥操作接合／脱离 | Enter（可配置）；等待接合、接合中或回位中按下则取消 |
-| 暂停／取消等待 | Space |
+| 接合／脱离 | Enter（天机入口可配置）；等待接合或回位中按下则取消。手部遥操作中 Enter 只开始／恢复 |
+| 暂停、取消等待 | Space |
+| 停止跟随并回位 | H（可配置）；手势：暂停后任一手先呈非张开，再双手张开保持 1 s |
 | 退出 | Q 或 Ctrl+C |
-| 联合模式开始／恢复 | 双手同时比 V 保持 0.3 秒 |
-| 联合模式暂停 | 任一手摇滚手势保持 0.3 秒 |
-| 停止跟随并回位，到位后脱离 | H；联合模式已暂停时也可双手张开保持 1 秒（需开启手势控制） |
-| 点动平移 | W/S、A/D、R/F：原生基座 X/Y/Z 正负方向，默认每键 5 mm |
+| 手势开始／恢复 | 双手比 V 保持 0.3 s |
+| 手势暂停 | 任一手摇滚手势保持 0.3 s |
+| 点动平移 | W/S、A/D、R/F：沿原生基座 X/Y/Z 正负方向，默认每键 5 mm |
 | 点动旋转 | I/K、J/L、U/O：绕原生基座 X/Y/Z 正负方向，默认每键 2° |
 
-在 [天机配置](configs/tianji_teleop.yaml) 的 `controls` 中，`toggle_engagement_key` 设置接合／脱离键（默认 `"enter"`，即回车，也可填单个字母或数字），`ready_pose_key` 设置停止跟随并回位的按键（默认 H）；终端需获得焦点。启动前的回车仍用于确认运动。`gesture_engagement_enabled: false` 关闭所有手势控制，包括比 V 接合、摇滚手势暂停和双手张开回位；键盘控制仍可用。联合模式的接合／脱离同步控制双臂与双手。
-
-天机遥操作使用默认配置时，设备未就绪按 Enter 会等待就绪后接合，Space 或再次按 Enter 可取消；已接合时再次按 Enter 脱离。若切换键改为其他按键，Enter 保留开始/恢复功能，所配置的按键负责切换和取消。追踪丢失、关键反馈无效或控制器错误会暂停；排除原因后须重新接合。天机暂停时保持实测关节目标，重新接合使用当前机器人和手柄位姿建立基准。
-
-接合时按 H 会先停止双臂与双手跟随，再清错并运动到 ready pose；未接合或已暂停时按 H 直接回位。无需再次按回车，到位后保持脱离，不自动恢复跟随。录制时按 H 会先结束当前录制。回位只移动所选机械臂，灵巧手保持暂停。手势回位需要暂停后任一手先明确呈非张开姿态，再双手张开；持续保持只触发一次。回位期间 Space、配置的接合/脱离键（默认 Enter）、摇滚手势（需开启手势控制）、Q 或 Ctrl+C 可中止。独立天机回位使用 Ctrl+C 中止。
-
-Hand2 双侧回零按先左后右执行，每侧到位并去使能后继续，完成后退出；失败或中止不继续下一侧。单侧回零到位后保持零角，Q 退出。
-
-两个遥操作命令均支持：
-
-- `--viewer`：独立窗口显示启动时连接的全部 RealSense 彩色画面；无相机或设备占用时提示并继续。关闭窗口不影响遥操作，快捷键仍在终端输入。
-- `-v` / `--verbose`：显示调试日志、跟随受限提示及完整故障诊断。默认仅输出关键状态和故障；`NO_COLOR=1` 关闭颜色。
-
-双臂 Quest 遥操作每次启动都会创建详细的结构化运行日志，终端会打印绝对路径。默认位置为
-`logs/teleop_quest_tianji_<时间>_<进程>.jsonl`，也可用 `--log-file PATH` 指定尚不存在的文件。
-日志采用逐行 JSON，包含配置与进程信息、每秒设备状态、Wuji 原始新鲜度期限、录制进程状态、
-主循环调度及处理器时间。正常控制周期先保存在内存中；发生暂停时才把故障前约 2 秒的逐周期
-映射、左右臂求解、驱动提交、目标期限及看门狗停机快照一次性写入，避免日志写盘干扰 5 ms 控制循环。
+- **按键配置**：天机配置 `controls` 的 `toggle_engagement_key`（默认 `"enter"`，也可为单个字母或数字）和 `ready_pose_key`（默认 `h`）不能用 Q/C/S/X；改成其他键后 Enter 仍可开始／恢复。按键需终端获得焦点。
+- **手势**：仅联合模式可用，由 `gesture_engagement_enabled` 统一开关，当前配置为关闭（配置省略该项时为开启）；键盘始终可用。联合模式下接合、脱离同时作用于双臂和双手。
+- **接合与暂停**：设备未就绪时按接合键会等就绪后自动接合。追踪丢失、关键反馈无效或控制器错误会暂停，排除后须重新接合；暂停时天机保持实测关节，重新接合以当前机器人和手柄位姿为基准。
+- **回位（H）**：先停止双臂和双手跟随，再清错并移动所选机械臂到 `ready_pose`，灵巧手保持暂停；到位后保持脱离。回位中按 Space、接合键、摇滚手势、Q 或 Ctrl+C 中止；独立回位命令用 Ctrl+C 中止。
+- **Hand2 回零**：双侧先左后右，每侧到位并去使能后继续，失败或中止则不做下一侧；单侧回零后保持零角，按 Q 退出。
 
 ### Quest 参考系与左右对应
 
-`quest.coordinate_frame` 支持 `headset`（默认）和 `world`。`headset` 的原点和水平朝向跟随头显，忽略俯仰、侧倾；`world` 使用 Quest LOCAL 世界坐标，重新定位可能改变原点。查看器始终显示 LOCAL 位姿。
+`--side` 指机器人侧；Wuji 左手套对应左 Hand2、右手套对应右 Hand2。
 
-**左手柄控制右臂，右手柄控制左臂。** `--side` 指机器人侧；Wuji 始终左手套对应左 Hand2、右手套对应右 Hand2。参考系的前、左、上映射到机器人相同物理方向，位置和旋转以接合姿态为基准。在 `headset` 模式下，移动头显或改变其 yaw 也会改变手柄相对位姿。
+`quest.coordinate_frame` 当前配置为 `world`：使用 Quest LOCAL 世界坐标，重新定位可能改变原点。`headset`（配置省略该项时的默认值）的原点和水平朝向跟随头显（忽略俯仰、侧倾），移动头显或转头也会改变手柄相对位姿。查看器始终显示 LOCAL 位姿。参考系的前、左、上映射到机器人相同物理方向，位姿以接合时为基准。
 
-## 数据采集
+### 运行日志
 
-快速操作、离线整理和故障恢复见[数据采集快速使用说明](docs/recording_quickstart.md)。完整字段与时间语义见[数据采集指南](docs/data_collection.md)。
-
-```bash
-# 双臂双手遥操作，同时启用原始数据采集和共享相机预览
-python scripts/teleop_quest_tianji.py --record --viewer
-
-# 退出采集后先整理原始数据；递归处理所有层级的条目，并删除已作废条目
-# 成功后 raw_spool 移到 raw_spools/（--spool-archive），条目内留符号链接；--refinalize 重新整理
-python scripts/finalize_recording.py --input recordings/<session>
-
-# 再分别导出两种动作空间；输出路径不得已存在
-python scripts/convert_recording.py --input recordings/<session> --output datasets/episodes_eef.zarr --action-space eef
-python scripts/convert_recording.py --input recordings/<session> --output datasets/episodes_joint.zarr --action-space joint
-```
-
-接合成功后按 `start_delay_s` 自动开始当前条；脱离只暂停，再次接合后继续同一条。**S** 保存、**X** 作废、**Q** 保存并退出。采集进程失败时先脱离，再按 **C** 恢复进程。S 保存的是待离线整理的原始条目；采集故障会结束当前条但不自动停止遥操作，设备安全故障仍会停止运动。三路 RGB 为 640×480、30 Hz，只有主 D435 默认采深度；低维状态默认记录 200 Hz。相机序列号、帧池长度和输出位置见[采集配置](configs/recording.yaml)。
-
-原始数据保持各流真实时间戳；整理完成后再统一到主 RGB 帧时间并导出 DP Zarr。已有环境补装依赖：`PIP_USER=false python -m pip install -e '.[recording]'`。
+`teleop_quest_tianji.py` 每次启动写一份 JSONL 运行日志，并在终端打印路径（默认 `logs/teleop_quest_tianji_<时间>_<进程>.jsonl`，相对启动目录）。日志包含启动参数与运行环境、警告和错误、录制故障和退出时的进程状态；每次暂停写入原因、设备诊断和故障前约 2 s 的控制周期快照。正常运行时不逐秒记录状态。排查暂停时请保留该文件。
 
 ## 手套标定
 
-左右分别标定，将 `NAME` 换成唯一用户名；首次创建用户，后续更新同名模型。完成后把用户名填入 Wuji 配置的 `sdk_user_name`。
+左右手分别标定，`NAME` 换成唯一用户名（不存在则创建，存在则更新）；完成后把用户名填入 Wuji 配置的 `sdk_user_name`。
 
 ```bash
 python scripts/calibrate_wuji_glove.py --kind joints --side left --user-name NAME
 python scripts/calibrate_wuji_glove.py --kind tactile --side left --user-name NAME
 ```
 
-按终端引导完成动作。参考官方[关节标定图示](https://docs.wuji.tech/docs/en/wuji-studio/latest/calibration/)和[触觉标定图示](https://docs.wuji.tech/docs/en/wuji-studio/latest/tactile-calibration/)。触觉标定全程保持无接触，要求 24×31 传感器数据。
+按终端引导完成动作，参考官方[关节标定](https://docs.wuji.tech/docs/en/wuji-studio/latest/calibration/)和[触觉标定](https://docs.wuji.tech/docs/en/wuji-studio/latest/tactile-calibration/)图示。触觉标定全程不得接触，要求 24×31 传感器数据。
 
 ## 常见问题
 
-- **Quest 无追踪**：拿起手柄按键唤醒，并放在头显摄像头可见范围；关闭系统菜单。Quest 3S 真正休眠后可能需要短按实体电源键，详见 [Quest 指南](quest_app/README.md#连接与追踪)。
-- **天机不能开始运动**：先排除具体控制器或伺服故障；启动清错仍失败时不会运动。可用 `clear_tianji_errors.py` 单独检查清错结果。
-- **退出停机未确认**：按实体急停并检查设备。正常退出会请求所控机械臂下伺服并等待新反馈；通信故障或强制结束进程可能使该流程无法完成。
-- **离线分析 IK 报错**：运行 `python scripts/analyze_tianji_ik.py failure.txt`，输入须含 `[IK诊断]` 或对应 JSON；它不分析 `[控制诊断]`，也不连接设备。
+- **Quest 无追踪**：按手柄按键唤醒，放在头显摄像头视野内，关闭系统菜单；详见 [Quest 客户端](quest_app/README.md#连接与追踪)。
+- **天机不能开始运动**：先排除控制器或伺服故障；启动清错失败时不会运动，可用 `clear_tianji_errors.py` 单独查看清错结果。
+- **退出时提示停机未确认**：按下实体急停并检查设备。正常退出会下伺服并等待反馈确认，通信故障或强杀进程时可能无法完成。
+- **分析 IK 报错**：`python scripts/analyze_tianji_ik.py failure.txt`，输入须含 `[IK诊断]` 或对应 JSON，离线运行。
 
 ## 测试
 
@@ -160,4 +175,4 @@ python scripts/calibrate_wuji_glove.py --kind tactile --side left --user-name NA
 conda run -n bimanual-teleop python -m unittest discover -s tests -q
 ```
 
-测试使用模拟设备、离线运动学和本机回环。实机验收按只读查看、单侧小幅运动、暂停与断流、双侧联合的顺序进行。
+测试不连接设备；实机验收步骤见[开发参考](docs/development.md#测试与验收)。

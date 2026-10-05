@@ -54,12 +54,12 @@
 
 本地代码入口：
 
-- [QuestInputMonitor](../bimanual_teleop/control/arm/quest.py)，尤其 `try_publish` 和 `current`。
-- [PoseGoalInterpolator](../bimanual_teleop/control/arm/mapping.py)，尤其 `sample`。
-- [TianjiCartesianExecutor](../bimanual_teleop/control/arm/cartesian.py)，尤其 `submit`。
-- [TianjiDriver](../bimanual_teleop/devices/tianji/driver.py)，尤其 `_watch`、`_send_command`、`request_hold`。
-- [C++ bridge](../tianji_bridge/bridge.cpp)，尤其 `target`、`tj_hook_send`。
-- [WujiProcess](../bimanual_teleop/control/hand/process.py) 保留源数据和工作线程的截止时间，并检查父进程心跳；[Wuji 适配器](../bimanual_teleop/devices/wuji/adapter.py) 在 `submit` 检查过期。已检查的手部路径没有展示与 Tianji 等价的原生发送时有效期检查，不能把两者当作相同保证。手部暂停时维持已选保持姿态属于显式 hold 策略，应与继续跟随旧输入区分。
+- [QuestInputMonitor](../../../bimanual_teleop/control/arm/quest.py)，尤其 `try_publish` 和 `current`。
+- [PoseGoalInterpolator](../../../bimanual_teleop/control/arm/mapping.py)，尤其 `sample`。
+- [TianjiCartesianExecutor](../../../bimanual_teleop/control/arm/cartesian.py)，尤其 `submit`。
+- [TianjiDriver](../../../bimanual_teleop/devices/tianji/driver.py)，尤其 `_watch`、`_send_command`、`request_hold`。
+- [C++ bridge](../../../tianji_bridge/bridge.cpp)，尤其 `target`、`tj_hook_send`。
+- [WujiProcess](../../../bimanual_teleop/control/hand/process.py) 保留源数据和工作线程的截止时间，并检查父进程心跳；[Wuji 适配器](../../../bimanual_teleop/devices/wuji/adapter.py) 在 `submit` 检查过期。已检查的手部路径没有展示与 Tianji 等价的原生发送时有效期检查，不能把两者当作相同保证。手部暂停时维持已选保持姿态属于显式 hold 策略，应与继续跟随旧输入区分。
 
 当前的“迟到处理”通常会升级为暂停：executor 拒绝目标、驱动发现命令过期、runtime 捕获异常都会进入 hold/pause 路径。它与 UMI 对单个迟到 waypoint 的静默跳过有实质区别。
 

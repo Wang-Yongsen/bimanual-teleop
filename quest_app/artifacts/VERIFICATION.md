@@ -33,9 +33,9 @@ GRADLE_USER_HOME=/home/yuchen/.cache/bimanual-teleop/gradle-home \
 - 修改 APK 的可选手部输入声明，使无手柄时可启动等待；移除原生 SDK 的 `khr/simple_controller` 回退绑定，仅保留 Touch 手柄输入。Python 启动时请求亮屏和 `prox_close` 保持活跃，退出或启动失败时恢复检测。
 - 离线 `assembleDebug lintDebug` 成功，Lint 为 0 errors、4 warnings；v2 签名验证通过。交付 APK 已更新并安装到 Quest 3S `340YC10GB00HL5`，系统 build incremental `3296320034600610`。
 - 更新前系统残留 `LaunchCheckControllerRequiredDialogActivity`，截图显示“需使用控制器／继续”。该旧窗口阻塞了新版的首次启动；本次通过 ADB 关闭该窗口后，新版可在双手柄 `active=false` 时直接进入 XR。连续观察 60 秒保持 `state=5`，运行时 90 Hz，5–60 秒采样的序号从 408 增至 5362。此结果不代表真休眠后的传感器锁已经解除。
-- 提示用户不佩戴头显、只拿起双手柄按扳机后，收到左右手柄 `flags=15, active=true` 的帧，`health()` 就绪。该次观察与追加的 ADB 唤醒广播相近，不能单独归因于广播；[原始汇总](../../docs/quest_wakeup_20260915.json) 保留完整试采停顿。
-- 从 `mWakefulness=Asleep` 开始，单次“先亮屏再覆盖”和每 2 秒重复覆盖都未通过自动恢复验证：设备亮屏，但 `SensorLockActivity` 和 Guardian 窗口阻止持续追踪。对应[单次试验](../../docs/quest_wakeup_20260915_oneshot.json)与[重复试验](../../docs/quest_wakeup_20260915_periodic.json)。重复广播没有解决传感器锁，最终代码不包含该后台刷新线程；不得把亮屏、ADB 返回成功或零序号缺口当作追踪恢复。
-- 最终使用无后台刷新线程的版本验证：用户确认“不佩戴，只按实体电源键并拿起手柄”。应用直接获得焦点，5、15、20 秒检查均为左右手柄 `flags=15, active=true` 且 `health()` 就绪；10 秒时头显追踪不足，被正确判为未就绪。无需佩戴头显或点击屏幕“继续”，但仍需实体电源键解除 Quest 3S 传感器锁。[该轮记录](../../docs/quest_wakeup_20260915_physical.json) 保留了这次短暂追踪不足；本轮没有连接机器人。
+- 提示用户不佩戴头显、只拿起双手柄按扳机后，收到左右手柄 `flags=15, active=true` 的帧，`health()` 就绪。该次观察与追加的 ADB 唤醒广播相近，不能单独归因于广播；[原始汇总](../../docs/history/validation/quest_wakeup_20260915.json) 保留完整试采停顿。
+- 从 `mWakefulness=Asleep` 开始，单次“先亮屏再覆盖”和每 2 秒重复覆盖都未通过自动恢复验证：设备亮屏，但 `SensorLockActivity` 和 Guardian 窗口阻止持续追踪。对应[单次试验](../../docs/history/validation/quest_wakeup_20260915_oneshot.json)与[重复试验](../../docs/history/validation/quest_wakeup_20260915_periodic.json)。重复广播没有解决传感器锁，最终代码不包含该后台刷新线程；不得把亮屏、ADB 返回成功或零序号缺口当作追踪恢复。
+- 最终使用无后台刷新线程的版本验证：用户确认“不佩戴，只按实体电源键并拿起手柄”。应用直接获得焦点，5、15、20 秒检查均为左右手柄 `flags=15, active=true` 且 `health()` 就绪；10 秒时头显追踪不足，被正确判为未就绪。无需佩戴头显或点击屏幕“继续”，但仍需实体电源键解除 Quest 3S 传感器锁。[该轮记录](../../docs/history/validation/quest_wakeup_20260915_physical.json) 保留了这次短暂追踪不足；本轮没有连接机器人。
 - Conda `bimanual-teleop` 环境的 Quest 相关 **165 项测试通过**。新增检查启动电源顺序、关闭恢复、失败清理、关闭幂等性、已有会话保护以及原生 Touch 绑定保留。构建和自动测试不代替不同固件、Quest 3、长时间颈挂与多轮真休眠恢复验收。
 
 ## 自动检查

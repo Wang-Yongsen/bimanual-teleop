@@ -38,9 +38,9 @@ Wuji 的 247 条 `Stall` 和 44 条 `Enc1BitRate` 不是这 9 次记录的停机
 
 代码链路：
 
-1. [mapping.py](../bimanual_teleop/control/arm/mapping.py) 的 `sample()` 在求解前设置 `expires=min(参与插值的源期限, now+50 ms)`。
-2. [cartesian.py](../bimanual_teleop/control/arm/cartesian.py) 的 `submit()` 串行计算左右臂，并保留创建时间和期限。
-3. [driver.py](../bimanual_teleop/devices/tianji/driver.py) 的 `_send_command()` 检查上一命令是否已过期；接受新命令时依旧保留其原到期时间。
+1. [mapping.py](../../../bimanual_teleop/control/arm/mapping.py) 的 `sample()` 在求解前设置 `expires=min(参与插值的源期限, now+50 ms)`。
+2. [cartesian.py](../../../bimanual_teleop/control/arm/cartesian.py) 的 `submit()` 串行计算左右臂，并保留创建时间和期限。
+3. [driver.py](../../../bimanual_teleop/devices/tianji/driver.py) 的 `_send_command()` 检查上一命令是否已过期；接受新命令时依旧保留其原到期时间。
 
 因此，在源期限未进一步缩短预算时，需要满足：
 
