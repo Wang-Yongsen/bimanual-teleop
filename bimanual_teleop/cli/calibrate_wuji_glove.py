@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 
 from bimanual_teleop.common.console import StatusConsole, configure_runtime_logging, print_message
 from bimanual_teleop.devices.wuji.config import add_glove_arguments, glove_settings
@@ -85,6 +86,8 @@ def extreme_yaw_count(metrics):
     """Count fingers whose yaw is far outside a near-zero target interval."""
     return sum(is_extreme_yaw_metric(metric) for metric in metrics)
 
+UNSTABLE_HINT_S = 20.
+
 STATES = {
     "waiting_movement": "先完全张开手，再摆出本步姿势；系统会自动识别。",
     "waiting_stable": "姿势已识别；保持手腕和手指不动。",
@@ -105,10 +108,13 @@ def step_label(info):
 
 
 class CalibrationGuide:
-    def __init__(self, kind):
+    def __init__(self, kind, *, clock=time.monotonic):
         self.kind = kind
+        self.clock = clock
         self.status = StatusConsole()
         self.last_step = None
+        self.variance_since = {}
+        self.variance_hinted = set()
 
     def feedback(self, info):
         name = info.get("step_name", "")
@@ -145,7 +151,17 @@ class CalibrationGuide:
             self.status.state(f"{label} {detail}".strip())
 
         if info.get("variance_ok") is False:
-            self.status.warning("手部移动过大；保持手腕和手指稳定。", key=(step, "variance"))
+            message = "手部移动过大"
+            variance, target = info.get("variance"), info.get("variance_target")
+            if isinstance(variance, (int, float)) and isinstance(target, (int, float)):
+                message += f"（SDK 方差 {variance:.3g}，上限 {target:.3g}）"
+            self.status.warning(f"{message}；保持手腕和手指稳定。", key=(step, "variance"))
+            since = self.variance_since.setdefault(step, self.clock())
+            if self.clock() - since >= UNSTABLE_HINT_S and step not in self.variance_hinted:
+                self.variance_hinted.add(step)
+                print_message("持续判定为不稳定；若手确实未动，多为 EMF 定位抖动：让手远离机械臂、"
+                              "电机、金属桌面、手机和金属饰品，检查手背发射模块与指尖模块是否松动，"
+                              "并用 view_wuji_glove.py 观察静止时骨架是否跳动。", "warning")
         metrics = info.get("metrics") or []
         if info.get("constraints_ok") is False:
             if name == "four_finger_bend_90":

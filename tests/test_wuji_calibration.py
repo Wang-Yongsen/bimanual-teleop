@@ -114,6 +114,23 @@ class CalibrationTests(unittest.TestCase):
         self.assertNotIn("逐根调整弯曲", shown)
         self.assertNotIn("使 yaw", shown)
 
+    def test_joint_guide_shows_variance_and_hints_emf_noise_once(self):
+        now = [0.]
+        feedback = {"step_index": 0, "step_total": 6, "step_name": "pinch_index",
+                    "state": "waiting_stable", "variance_ok": False,
+                    "variance": 0.00123, "variance_target": 0.0005}
+        output = StringIO()
+        with redirect_stderr(output):
+            guide = CalibrationGuide("joints", clock=lambda: now[0])
+            guide.feedback(feedback)
+            now[0] = 25.
+            guide.feedback(feedback)
+            now[0] = 50.
+            guide.feedback(feedback)
+        shown = output.getvalue()
+        self.assertIn("手部移动过大（SDK 方差 0.00123，上限 0.0005）", shown)
+        self.assertEqual(shown.count("EMF 定位抖动"), 1)
+
     def test_tactile_guide_separates_start_and_review_choices(self):
         ready = {"kind": "pose_ready", "step_index": 0, "step_total": 4,
                  "step_name": "four_finger_L_thumb_in", "seconds_per_pose": 30}
