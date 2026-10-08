@@ -71,13 +71,16 @@ python scripts/finalize_recording.py --input recordings/<session> --spool-archiv
 
 ## 5. 转换训练数据
 
+本步在 `bimanual-teleop` 根目录完成，转换配置位于 `configs/`；导轨任务专用流程及旧会话暂停复核配置见[导轨 zarr 生成说明](tianji-rail/README.md)。
+
 末端动作空间：
 
 ```bash
 python scripts/convert_recording.py \
   --input recordings/<session> \
-  --output datasets/episodes_eef.zarr \
-  --action-space eef
+  --output datasets/episodes_eef_repaired.zarr \
+  --action-space eef \
+  --conversion-config configs/recording_conversion.yaml
 ```
 
 关节动作空间：
@@ -85,9 +88,12 @@ python scripts/convert_recording.py \
 ```bash
 python scripts/convert_recording.py \
   --input recordings/<session> \
-  --output datasets/episodes_joint.zarr \
-  --action-space joint
+  --output datasets/episodes_joint_repaired.zarr \
+  --action-space joint \
+  --conversion-config configs/recording_conversion.yaml
 ```
+
+上述命令显式启用[短缺口修复配置](../configs/recording_conversion.yaml)的 `mode: repair`：30 Hz 网格、每路最多复用两帧短缺口、状态插值上限 100 ms；指令年龄上限仍为 50 ms，暂停未经复核不合并。不传 `--conversion-config` 使用严格模式。输出路径必须不存在；从原始记录生成新 zarr，不对已有数据集原地补值。可在输出的 `meta.attrs['quality_report']['conversion_config']` 中确认 `mode` 是否为 `repair`，并查看各条目的 `camera_repairs` 与 `pauses`。
 
 ## 6. 状态含义
 

@@ -26,11 +26,11 @@ adb install -r quest_app/artifacts/quest-capture-debug.apk
 
 ## 配置
 
-| 文件 | 需要设置的内容 |
-| --- | --- |
-| [天机配置](configs/tianji_teleop.yaml) | `controller_ip`、运动参数 `profile`、回位目标 `ready_pose`、参考系 `quest.coordinate_frame` |
-| [Wuji 配置](configs/wuji_teleop.yaml) | 左右设备地址 `devices`、已标定用户名 `sdk_user_name`、Hand2 反馈频率 `feedback_hz`；空用户名使用 SDK 默认用户 |
-| [采集配置](configs/recording.yaml) | 相机序列号、按主机内存设置的 `frame_capacity`、接合后等待 `start_delay_s`、录制按键 |
+| 文件                                  | 需要设置的内容                                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| [天机配置](configs/tianji_teleop.yaml) | `controller_ip`、运动参数 `profile`、回位目标 `ready_pose`、参考系 `quest.coordinate_frame`                |
+| [Wuji 配置](configs/wuji_teleop.yaml)  | 左右设备地址`devices`、已标定用户名 `sdk_user_name`、Hand2 反馈频率 `feedback_hz`；空用户名使用 SDK 默认用户 |
+| [采集配置](configs/recording.yaml)     | 相机序列号、按主机内存设置的`frame_capacity`、接合后等待 `start_delay_s`、录制按键                             |
 
 参数单位和数组顺序见 YAML 注释，修改后重启程序。联合遥操作读取两份配置，可用 `--tianji-config PATH`、`--wuji-config PATH` 指定其他文件。手套查看和遥操作支持 `--user-name NAME` 临时选择已有用户。采集另用 `--recording-config PATH`。
 
@@ -78,17 +78,17 @@ python scripts/home_wuji_hand2.py --side both
 
 运动命令需要交互终端。检查运动范围、释放实体急停并做好急停准备，按回车确认。天机遥操作和点动先清错、回初始位姿，再等待接合；手部遥操作连接就绪后等待接合；独立回位命令确认后直接回位。
 
-| 操作 | 按键或手势 |
-| --- | --- |
-| 手部遥操作开始／恢复 | Enter |
-| 天机遥操作接合／脱离 | Enter（可配置）；等待接合、接合中或回位中按下则取消 |
-| 暂停／取消等待 | Space |
-| 退出 | Q 或 Ctrl+C |
-| 联合模式开始／恢复 | 双手同时比 V 保持 0.3 秒 |
-| 联合模式暂停 | 任一手摇滚手势保持 0.3 秒 |
+| 操作                       | 按键或手势                                                 |
+| -------------------------- | ---------------------------------------------------------- |
+| 手部遥操作开始／恢复       | Enter                                                      |
+| 天机遥操作接合／脱离       | Enter（可配置）；等待接合、接合中或回位中按下则取消        |
+| 暂停／取消等待             | Space                                                      |
+| 退出                       | Q 或 Ctrl+C                                                |
+| 联合模式开始／恢复         | 双手同时比 V 保持 0.3 秒                                   |
+| 联合模式暂停               | 任一手摇滚手势保持 0.3 秒                                  |
 | 停止跟随并回位，到位后脱离 | H；联合模式已暂停时也可双手张开保持 1 秒（需开启手势控制） |
-| 点动平移 | W/S、A/D、R/F：原生基座 X/Y/Z 正负方向，默认每键 5 mm |
-| 点动旋转 | I/K、J/L、U/O：绕原生基座 X/Y/Z 正负方向，默认每键 2° |
+| 点动平移                   | W/S、A/D、R/F：原生基座 X/Y/Z 正负方向，默认每键 5 mm      |
+| 点动旋转                   | I/K、J/L、U/O：绕原生基座 X/Y/Z 正负方向，默认每键 2°     |
 
 在 [天机配置](configs/tianji_teleop.yaml) 的 `controls` 中，`toggle_engagement_key` 设置接合／脱离键（默认 `"enter"`，即回车，也可填单个字母或数字），`ready_pose_key` 设置停止跟随并回位的按键（默认 H）；终端需获得焦点。启动前的回车仍用于确认运动。`gesture_engagement_enabled: false` 关闭所有手势控制，包括比 V 接合、摇滚手势暂停和双手张开回位；键盘控制仍可用。联合模式的接合／脱离同步控制双臂与双手。
 
@@ -119,6 +119,8 @@ Hand2 双侧回零按先左后右执行，每侧到位并去使能后继续，�
 
 快速操作、离线整理和故障恢复见[数据采集快速使用说明](docs/recording_quickstart.md)。完整字段与时间语义见[数据采集指南](docs/data_collection.md)。
 
+采集、整理及 zarr 生成均在本项目完成，转换配置放在 `configs/`，新数据建议输出到 `datasets/`。导轨任务的流程、会话复核配置及训练交接见[导轨 zarr 生成说明](docs/tianji-rail/README.md)。
+
 ```bash
 # 双臂双手遥操作，同时启用原始数据采集和共享相机预览
 python scripts/teleop_quest_tianji.py --record --viewer
@@ -127,14 +129,16 @@ python scripts/teleop_quest_tianji.py --record --viewer
 # 成功后 raw_spool 移到 raw_spools/（--spool-archive），条目内留符号链接；--refinalize 重新整理
 python scripts/finalize_recording.py --input recordings/<session>
 
-# 再分别导出两种动作空间；输出路径不得已存在
-python scripts/convert_recording.py --input recordings/<session> --output datasets/episodes_eef.zarr --action-space eef
-python scripts/convert_recording.py --input recordings/<session> --output datasets/episodes_joint.zarr --action-space joint
+# 再分别导出两种动作空间，显式启用短缺口修复；输出路径不得已存在
+python scripts/convert_recording.py --input recordings/<session> --output datasets/episodes_eef_repaired.zarr --action-space eef --conversion-config configs/recording_conversion.yaml
+python scripts/convert_recording.py --input recordings/<session> --output datasets/episodes_joint_repaired.zarr --action-space joint --conversion-config configs/recording_conversion.yaml
 ```
+
+**缺口修复在离线转换时启用**：传入 `--conversion-config configs/recording_conversion.yaml`，并保持该文件 `mode: repair`。默认建立 30 Hz 网格，最多复用两帧相机短缺口，状态插值间隔上限 100 ms；动作仅使用过去成功提交的指令，年龄上限仍为 50 ms。参数作用、关闭方式及修改建议见[转换配置](configs/recording_conversion.yaml)。不传该参数会使用原严格模式，配置文件存在不会自动启用。暂停接缝默认保留边界，只有明确复核并配置 `merge: true` 才合并。
 
 接合成功后按 `start_delay_s` 自动开始当前条；脱离只暂停，再次接合后继续同一条。**S** 保存、**X** 作废、**Q** 保存并退出。采集进程失败时先脱离，再按 **C** 恢复进程。S 保存的是待离线整理的原始条目；采集故障会结束当前条但不自动停止遥操作，设备安全故障仍会停止运动。三路 RGB 为 640×480、30 Hz，只有主 D435 默认采深度；低维状态默认记录 200 Hz。相机序列号、帧池长度和输出位置见[采集配置](configs/recording.yaml)。
 
-原始数据保持各流真实时间戳；整理完成后再统一到主 RGB 帧时间并导出 DP Zarr。已有环境补装依赖：`PIP_USER=false python -m pip install -e '.[recording]'`。
+原始数据保持各流真实时间戳；整理完成后导出 DP Zarr：修复模式使用固定时间网格，严格模式使用主 RGB 真实帧时间。转换只读取原始记录并新建输出，不对已有 zarr 原地补值。已有环境补装依赖：`PIP_USER=false python -m pip install -e '.[recording]'`。
 
 ## 手套标定
 

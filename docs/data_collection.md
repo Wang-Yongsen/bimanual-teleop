@@ -102,6 +102,8 @@ RGB 在线使用三路独立 NVENC H.264 编码；每个真实采集帧只编码
 
 ## 离线转换
 
+采集、整理和转换入口均属于 `bimanual-teleop`；转换配置统一放在 `configs/`，新建训练数据建议输出到 `datasets/`。导轨任务流程、旧会话复核配置及训练交接见[导轨 zarr 生成说明](tianji-rail/README.md)。
+
 以下转换要求先完成 `finalize_recording.py`，输入中的条目状态必须为 `complete`。
 
 ```bash
@@ -118,9 +120,30 @@ python scripts/convert_recording.py \
 
 默认只导出 RGB、机器人状态与动作：即使原始记录包含深度，也不读取、导出深度或因深度缺帧剔除 RGB 样本。需要深度数据时显式添加 `--include-depth`，此时保留原来的深度匹配检查。同一次转换在默认 RGB 模式下可混合有深度与无深度的原始记录；显式包含深度时，完整条目的深度开关必须一致。
 
-以主 RGB 的真实帧时间为基准，其他 RGB 选最近帧，最大时间差 20 ms；显式包含深度时，深度也采用同一匹配规则。实际关节、位置和力线性插值，姿态用 SLERP；状态插值间隔不得超过 50 ms，不在观测边界外补值。action 取该时刻之前最近一次成功提交的目标，最大命令龄 50 ms，不插值控制命令、不人为移动一帧。
+**严格模式**：上方命令不传 `--conversion-config`，以主 RGB 的真实帧时间为基准，其他 RGB 选最近帧，最大时间差 20 ms；显式包含深度时，深度也采用同一匹配规则。实际关节、位置和力线性插值，姿态用 SLERP；状态插值间隔不得超过 50 ms，不在观测边界外补值。action 取该时刻之前最近一次成功提交的目标，最大命令龄 50 ms，不插值控制命令、不人为移动一帧。
 
-缺失、无效数据和主相机超过 50 ms 的帧间隔会拆成连续片段；训练采样不会跨缺口。首尾不满足对齐条件的帧被裁掉。原始时间轴是名义 30 Hz，而非人为生成的严格等间隔网格。
+严格模式下，缺失、无效数据和主相机超过 50 ms 的帧间隔会拆成连续片段；训练采样不会跨缺口。首尾不满足对齐条件的帧被裁掉。时间轴是名义 30 Hz，而非人为生成的严格等间隔网格。
+
+**短缺口修复模式**：转换时显式添加 `--conversion-config configs/recording_conversion.yaml`，配置保持 `mode: repair`，例如：
+
+```bash
+python scripts/convert_recording.py \
+  --input recordings/<session> \
+  --output datasets/episodes_eef_repaired.zarr \
+  --action-space eef \
+  --conversion-config configs/recording_conversion.yaml
+```
+
+该模式从原始记录生成新数据集，输出路径必须不存在，不修改已有 zarr。配置文件存在不会自动生效。所有参数及修改建议见[转换配置](../configs/recording_conversion.yaml)：
+
+- 每个持续录制区间建立固定 30 Hz 网格；图像优先匹配 20 ms 内的最近真实帧，内部连续未匹配点最多两个时复用过去图像，不延伸首尾覆盖。
+- 实测状态按原流插值，默认两端间隔上限 100 ms，姿态使用 SLERP；动作保持过去成功提交目标，上限仍为 50 ms，不插值指令。
+- 根据相机来源时间与录制时间的偏移识别暂停，先独立对齐两侧；未经复核保留边界。仅在 `pause_reviews` 按准确来源名和暂停后主相机原始帧索引记录 `merge: true` 及依据时压缩等待、合并接缝，不为暂停期间生成虚构轨迹。
+- 超限缺口、无效状态或过期指令仍切段。`max_missing_camera_frames: 0` 关闭图像复用；配置 `mode: strict` 或省略 CLI 参数使用原严格模式。
+
+启用后 `meta.attrs['quality_report']['conversion_config']['mode']` 为 `repair`；各条目报告含 `camera_repairs`（复用数量、比例及最大图像年龄）和 `pauses`（接缝决定及依据）。严格模式不传配置时 `conversion_config` 为 null。修复模式另保存逐样本图像来源、复用标记、命令年龄、录制时间与来源时间；`data/timestamp` 表示修复后的训练网格时间。原始演示边界和连续片段边界的约定仍如下。
+
+Zarr 的每个数组在磁盘上对应一个目录，因此修复版 `meta/` 有 11 个数组目录：原有 `episode_ends`、`segment_ends`，加上 9 个追溯数组。`camera_source_row`、`camera_reused`、`camera_source_time_ms`、`camera_time_offset_ns` 记录三路图像来源及时间匹配；`recording_time_ns`、`source_time_ns`、`recording_block` 记录录制区间与来源时间映射；`command_age_ns` 记录指令年龄；`state_interpolated` 标记状态插值。这些目录不是额外演示或视频副本，新增追溯字段默认不进入模型观测。片段帧数用 `segment_ends` 的累计边界差分计算；修复后的输出帧数可能与原始主相机索引跨度不同。
 
 输出 schema v2 使用 DP ReplayBuffer 的 `data/*`，并区分两类累计边界：
 
